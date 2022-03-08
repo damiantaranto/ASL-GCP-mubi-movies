@@ -1,0 +1,98 @@
+import os
+import tensorflow as tf
+
+from mubireco.data.base import DataPrep
+
+
+class InferenceDataset(DataPrep):
+    """Inference: TF dataset preparation"""
+
+    name_transformation = "inference"
+
+    query = f"""WITH ratings AS (
+        SELECT
+            ratings.user_id,
+            ratings.movie_id,
+            ratings.rating_id,
+            ratings.rating_timestamp_utc,
+            ratings.rating_score,
+            COALESCE(ratings.user_eligible_for_trial, False) as user_eligible_for_trial,
+            COALESCE(ratings.user_has_payment_method, False) as user_has_payment_method,
+            COALESCE(ratings.user_subscriber, False) as user_subscriber,
+            COALESCE(ratings.user_trialist, False) as user_trialist,
+            movies.movie_title,
+            COALESCE(movies.movie_release_year, 0) as movie_release_year,
+            movies.movie_title_language,
+            LAST_VALUE(ratings.rating_timestamp_utc) OVER (PARTITION BY user_id
+                ORDER BY ratings.rating_timestamp_utc ASC
+                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_rating_timestamp
+        FROM `__DATASET_ID__.mubi_ratings_data` ratings
+        JOIN `__DATASET_ID__.mubi_movie_data` movies ON
+            ratings.movie_id = movies.movie_id
+    ), sequenced_rating AS (
+        SELECT
+            movie_title,
+            movie_id,
+            user_id,
+            user_eligible_for_trial,
+            user_has_payment_method,
+            user_subscriber,
+            user_trialist,
+            rating_timestamp_utc,
+            last_rating_timestamp,
+            (ARRAY_AGG(movie_id) OVER (PARTITION BY user_id
+                ORDER BY rating_timestamp_utc
+                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING)) AS previous_movie_ratings,
+            (ARRAY_AGG(movie_release_year) OVER (PARTITION BY user_id
+                ORDER BY rating_timestamp_utc
+                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING)) AS previous_movie_years
+        FROM ratings
+    )
+    SELECT * FROM sequenced_rating
+    WHERE rating_timestamp_utc = last_rating_timestamp"""
+
+    def __init__(self, configuration, **kwargs):
+        super().__init__(configuration, **kwargs)
+        self._start_frame = self.seq_length - 1
+        self._end_frame = 0
+
+    def set_data_path(self) -> str:
+        return os.path.join(self.data_root, self.name_transformation)
+
+    def set_output_filename(self) -> str:
+        return self.output_filename.get(self.name_transformation)
+
+    def get_features_dict(self, rows) -> dict:
+        dict_features = dict(
+            **rows[["user_eligible_for_trial"]].astype("int"),
+            **rows[["user_has_payment_method"]].astype("int"),
+            **rows[["user_subscriber"]].astype("int"),
+            **rows[["user_trialist"]].astype("int"),
+            **{"previous_movie_ratings":
+                tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_ratings"].values,
+                                                              maxlen=self.seq_length, dtype='int32', value=0)},
+            **{"previous_movie_years":
+                tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_years"].values,
+                                                              maxlen=self.seq_length, dtype='float32', value=1980.0)}
+        )
+        return dict_features
+
+    def run(self):
+        try:
+            assert not tf.io.gfile.exists(self.output_path)
+        except AssertionError:
+            raise ValueError("Dataset already exists, load it. Remove timestamp from config in case of new run")
+
+        query = (
+            self.query
+            .replace("__DATASET_ID__", str(self.dataset_id))
+            .replace("__FRAME_START__", str(self._start_frame))
+            .replace("__FRAME_END__", str(self._end_frame))
+        )
+
+        rows = self.load_dataset(query)
+
+        dict_features = self.get_features_dict(rows)
+        del rows
+
+        self.save_tf_dataset(dict_features)
