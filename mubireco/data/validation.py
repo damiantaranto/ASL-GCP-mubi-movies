@@ -4,10 +4,10 @@ import tensorflow as tf
 from mubireco.data.base import DataPrep
 
 
-class TrainDataset(DataPrep):
+class ValidationDataset(DataPrep):
     """Train: TF dataset preparation"""
 
-    name_transformation = "train"
+    name_transformation = "validation"
 
     query = f"""WITH ratings AS (
         SELECT
@@ -48,7 +48,7 @@ class TrainDataset(DataPrep):
         FROM ratings
     )
     SELECT * FROM sequenced_rating
-    WHERE ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 5)) IN (0, 1, 3, 4)"""
+    WHERE ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 5)) = 2"""
 
     def __init__(self, configuration, **kwargs):
         super().__init__(configuration, **kwargs)
