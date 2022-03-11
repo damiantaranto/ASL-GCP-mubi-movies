@@ -94,6 +94,7 @@ class TrainDataset(DataPrep):
             **rows[["user_eligible_for_trial"]].astype("int"),
             **rows[["user_has_payment_method"]].astype("int"),
             **rows[["user_subscriber"]].astype("int"),
+            **rows[["user_trialist"]].astype("int"),
             **{"previous_movie_ids":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_ids"].values,
                                                               maxlen=self.seq_length, dtype='int32', value=0)},
