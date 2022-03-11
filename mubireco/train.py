@@ -71,9 +71,11 @@ def train_and_evaluate(hparams):
       tf.data.Dataset.zip((ds_inf.map(lambda x: x["user_id"]).batch(batch_size), ds_inf.batch(batch_size).map(model.candidate_model)))
     )
     
+    # example, to keep otherwise bug in saved model
+    _, _ = index(tf.constant([42]))
+    
+    path = f"gs://{bucket_name}/{timestamp}/models"
     with tempfile.TemporaryDirectory() as tmp:
-        path = f"gs://{bucket_name}/{timestamp}/models"
-
         # Save the index.
         tf.saved_model.save(index, path)
 
