@@ -16,7 +16,7 @@ from mubireco.data.validation import ValidationDataset
 
 from mubireco.utils.configuration import Configuration
 
-from mubireco.train.model_definition import create_model
+from mubireco.model.model_definition import create_model
 
 
 def train_and_evaluate(hparams):
