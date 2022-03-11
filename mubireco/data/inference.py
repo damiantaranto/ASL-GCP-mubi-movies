@@ -16,39 +16,65 @@ class InferenceDataset(DataPrep):
             ratings.rating_id,
             ratings.rating_timestamp_utc,
             ratings.rating_score,
-            COALESCE(ratings.user_eligible_for_trial, False) as user_eligible_for_trial,
-            COALESCE(ratings.user_has_payment_method, False) as user_has_payment_method,
-            COALESCE(ratings.user_subscriber, False) as user_subscriber,
-            COALESCE(ratings.user_trialist, False) as user_trialist,
+            COALESCE(ratings.user_eligible_for_trial, False) AS user_eligible_for_trial,
+            COALESCE(ratings.user_has_payment_method, False) AS user_has_payment_method,
+            COALESCE(ratings.user_subscriber, False) AS user_subscriber,
+            COALESCE(ratings.user_trialist, False) AS user_trialist,
             movies.movie_title,
+            COALESCE(ratings.rating_score,
+             PERCENTILE_DISC(ratings.rating_score, 0.5) OVER (PARTITION BY ratings.movie_id)) AS rating_value,
+            COALESCE(DATE_DIFF(ratings.rating_timestamp_utc, LAG(ratings.rating_timestamp_utc, 1)
+                OVER (PARTITION BY user_id ORDER BY ratings.rating_timestamp_utc),  DAY), -1) AS days_since_last_rating,
             COALESCE(movies.movie_release_year, 0) as movie_release_year,
             movies.movie_title_language,
             LAST_VALUE(ratings.rating_timestamp_utc) OVER (PARTITION BY user_id
-                ORDER BY ratings.rating_timestamp_utc ASC
+                ORDER BY ratings.rating_timestamp_utc
                 ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_rating_timestamp
         FROM `__DATASET_ID__.mubi_ratings_data` ratings
         JOIN `__DATASET_ID__.mubi_movie_data` movies ON
             ratings.movie_id = movies.movie_id
-    ), sequenced_rating AS (
+            AND ratings.rating_score IS NOT NULL
+    ),
+    shifted_last_rating AS (
+         SELECT
+             ratings.user_id,
+             ratings.movie_id,
+             COALESCE(LAG(ratings.days_since_last_rating, 1) over (PARTITION BY user_id
+                ORDER BY ratings.days_since_last_rating DESC), 0) as shifted_days,
+         FROM ratings
+    ),
+    sequenced_rating AS (
         SELECT
             movie_title,
-            movie_id,
-            user_id,
+            ratings.movie_id,
+            ratings.user_id,
+            rating_value,
+            movie_release_year,
+            rating_timestamp_utc,
             user_eligible_for_trial,
+            days_since_last_rating,
             user_has_payment_method,
             user_subscriber,
             user_trialist,
-            rating_timestamp_utc,
             last_rating_timestamp,
-            (ARRAY_AGG(movie_id) OVER (PARTITION BY user_id
-                ORDER BY rating_timestamp_utc
-                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING)) AS previous_movie_ratings,
-            (ARRAY_AGG(movie_release_year) OVER (PARTITION BY user_id
-                ORDER BY rating_timestamp_utc
-                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING)) AS previous_movie_years
+            ARRAY_AGG(ratings.movie_id) OVER (PARTITION BY ratings.user_id
+                ORDER BY rating_timestamp_utc asc
+                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_ids,
+            ARRAY_AGG(movie_release_year) OVER (PARTITION BY ratings.user_id
+                ORDER BY rating_timestamp_utc asc
+                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_years,
+            ARRAY_AGG(rating_value) OVER (PARTITION BY ratings.user_id
+                ORDER BY rating_timestamp_utc asc
+                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_score,
+            ARRAY_AGG(shifted_days) OVER (PARTITION BY ratings.user_id
+                ORDER BY rating_timestamp_utc asc
+                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_days_since_last_rating,
         FROM ratings
+        INNER JOIN shifted_last_rating ON
+            ratings.user_id = shifted_last_rating.user_id
+            AND ratings.movie_id = shifted_last_rating.movie_id
     )
-    SELECT * FROM sequenced_rating
+    SELECT * FROM sequenced_rating --where ARRAY_LENGTH(previous_movie_ids) > 2
     WHERE rating_timestamp_utc = last_rating_timestamp"""
 
     def __init__(self, configuration, **kwargs):
@@ -68,12 +94,18 @@ class InferenceDataset(DataPrep):
             **rows[["user_has_payment_method"]].astype("int"),
             **rows[["user_subscriber"]].astype("int"),
             **rows[["user_trialist"]].astype("int"),
-            **{"previous_movie_ratings":
-                tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_ratings"].values,
+            **{"previous_movie_ids":
+                tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_ids"].values,
                                                               maxlen=self.seq_length, dtype='int32', value=0)},
             **{"previous_movie_years":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_years"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=1980.0)}
+                                                              maxlen=self.seq_length, dtype='float32', value=1980.0)},
+            **{"previous_score":
+                tf.keras.preprocessing.sequence.pad_sequences(rows["previous_score"].values,
+                                                              maxlen=self.seq_length, dtype='float32', value=2.5)},
+            **{"previous_days_since_last_rating":
+                tf.keras.preprocessing.sequence.pad_sequences(rows["previous_days_since_last_rating"].values,
+                                                              maxlen=self.seq_length, dtype='float32', value=0)}
         )
         return dict_features
 
