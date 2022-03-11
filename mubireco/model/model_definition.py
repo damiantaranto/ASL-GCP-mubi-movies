@@ -1,14 +1,9 @@
-import os
-import pprint
-
-from typing import Dict, Text
-import pandas as pd
-
 import numpy as np
 import tensorflow as tf
 import tensorflow_recommenders as tfrs
 
 from mubireco.data.movies import MoviesDataset
+from mubireco.data.train import TrainDataset
 
 
 class CandidateEncoder(tf.keras.layers.Layer):
@@ -45,7 +40,6 @@ class CandidateEncoder(tf.keras.layers.Layer):
         seq_years = tf.expand_dims(self._norm_model_years(features["previous_movie_years"]), -1)
         seq_scores = tf.expand_dims(self._norm_model_scores(features["previous_score"]), -1)
 
-
         concat_sequence = tf.concat([seq_embedding, seq_years, seq_scores], axis=-1)
 
         encoder = self._gru_encoder(concat_sequence)
@@ -59,7 +53,7 @@ class CandidateEncoder(tf.keras.layers.Layer):
     
 class MubiMoviesModel(tfrs.Model):
 
-    def __init__(self, taks, candidate_model, query_model):
+    def __init__(self, task, candidate_model, query_model):
         super().__init__()
 
         self._query_model = query_model
@@ -76,9 +70,10 @@ class MubiMoviesModel(tfrs.Model):
         return self._task(query_encoder, candidate_encoder, compute_metrics=True)
 
     
-def create_model(batch_size, embedding_dimension):
+def create_model(batch_size, embedding_dimension, config):
 
     df_movies = MoviesDataset(config).read_tf_dataset()
+    ds_train = TrainDataset(config).read_tf_dataset()
     unique_movie_ids = np.unique(np.concatenate(list(df_movies.batch(batch_size).map(lambda x: x["movie_id"]))))
 
     query_model = tf.keras.Sequential([

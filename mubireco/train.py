@@ -1,15 +1,6 @@
 import time
-import os
-import pprint
 import argparse
-import json
-
-from typing import Dict, Text
-import pandas as pd
-
-import numpy as np
 import tensorflow as tf
-import tensorflow_recommenders as tfrs
 
 from mubireco.data.train import TrainDataset
 from mubireco.data.validation import ValidationDataset
@@ -25,9 +16,9 @@ def train_and_evaluate(hparams):
     ds_train = TrainDataset(config).read_tf_dataset()
     ds_val = ValidationDataset(config).read_tf_dataset()
 
-    batch_size = hparams["batch_size"] #10000
-    num_evals = hparams["num_evals"] #100
-    lr = hparams["lr"] #0.1
+    batch_size = hparams["batch_size"]  # 10000
+    num_evals = hparams["num_evals"]  # 100
+    lr = hparams["lr"]  # 0.1
     bucket_name = hparams["bucket_name"]
     timestamp = hparams["timestamp"]
     embedding_dim = hparams["embedding_dim"]
@@ -46,12 +37,12 @@ def train_and_evaluate(hparams):
 
     early_stopping_cb = tf.keras.callbacks.EarlyStopping(patience=10, monitor="factorized_top_k/top_100_categorical_accuracy")
 
-    ##################### For MirroredStrategy ###################
+    # For MirroredStrategy #
     strategy = tf.distribute.MirroredStrategy()
 
     with strategy.scope():
-    ###############################################################
-        model = create_model(batch_size, embedding_dim)
+    # End #
+        model = create_model(batch_size, embedding_dim, config)
         model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=lr))
 
     start = time.time()
@@ -66,6 +57,7 @@ def train_and_evaluate(hparams):
     print("Training time with single GPUs: {}".format(time.time() - start))
     
     model.save(f"gs://{bucket_name}/{timestamp}/models")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
