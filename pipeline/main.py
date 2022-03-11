@@ -19,7 +19,7 @@ def tensorflow_pipeline(
 
     movie_query = movies_dataset(
         project_id=project_id,
-        data_root="gs://{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
+        data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
         movies_output_filename="movies_mubi.tfdataset"
     )
 

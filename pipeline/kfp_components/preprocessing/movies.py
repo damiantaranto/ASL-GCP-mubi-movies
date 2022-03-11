@@ -1,8 +1,8 @@
 from kfp.v2.dsl import Dataset, Output, component
-from pipeline.kfp_components.dependencies import PYTHON37, GOOGLE_CLOUD_BIGQUERY, TENSORFLOW, PANDAS
+from pipeline.kfp_components.dependencies import PYTHON37, GOOGLE_CLOUD_BIGQUERY, TENSORFLOW, PANDAS, PYARROW
 
 
-@component(base_image=PYTHON37, packages_to_install=[GOOGLE_CLOUD_BIGQUERY, TENSORFLOW, PANDAS])
+@component(base_image=PYTHON37, packages_to_install=[GOOGLE_CLOUD_BIGQUERY, TENSORFLOW, PANDAS, PYARROW])
 def movies_dataset(
         project_id: str,
         data_root: str,
@@ -18,8 +18,8 @@ def movies_dataset(
     sql_query = f"""SELECT DISTINCT
             ratings.movie_id,
             movies.movie_title,
-        FROM `raw_dataset.mubi_ratings_data` ratings
-        JOIN `raw_dataset.mubi_movie_data` movies ON
+        FROM `mubi_movie_data.mubi_ratings_data` ratings
+        JOIN `mubi_movie_data.mubi_movie_data` movies ON
             ratings.movie_id = movies.movie_id"""
 
     data_path = os.path.join(data_root, name_transformation)
@@ -27,8 +27,8 @@ def movies_dataset(
     output_path = os.path.join(data_path, movies_output_filename)
 
     def load_dataset(query) -> pd.DataFrame:
-        bq_client = bigquery.Client(project=project_id)
-        results = bq_client.query(query).to_dataframe()
+        bq_client = bigquery.Client()
+        results = bq_client.query(query, project=project_id).to_dataframe()
         return results
 
     def save_tf_dataset(dict_features) -> None:

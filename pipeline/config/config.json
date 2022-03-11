@@ -6,7 +6,7 @@
     },
     "data": {
         "project_id": "qwiklabs-gcp-04-424f1fdacc59",
-        "model_name": "xgboost-with-preprocessing",
+        "model_name": "model_name",
         "timestamp": "20220308134842"
     }
 }
