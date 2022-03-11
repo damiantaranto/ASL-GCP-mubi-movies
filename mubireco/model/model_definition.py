@@ -37,10 +37,9 @@ class CandidateEncoder(tf.keras.layers.Layer):
     def call(self, features):
 
         seq_embedding = self._embedding_model(features["previous_movie_ids"])
-        seq_years = tf.expand_dims(self._norm_model_years(features["previous_movie_years"]), -1)
         seq_scores = tf.expand_dims(self._norm_model_scores(features["previous_score"]), -1)
 
-        concat_sequence = tf.concat([seq_embedding, seq_years, seq_scores], axis=-1)
+        concat_sequence = tf.concat([seq_embedding, seq_scores], axis=-1)
 
         encoder = self._gru_encoder(concat_sequence)
 
@@ -56,18 +55,18 @@ class MubiMoviesModel(tfrs.Model):
     def __init__(self, task, candidate_model, query_model):
         super().__init__()
 
-        self._query_model = query_model
-        self._candidate_model = candidate_model
+        self.query_model = query_model
+        self.candidate_model = candidate_model
 
         self._task = task
 
     def compute_loss(self, features, training=False):
         query = features.pop("movie_id")
 
-        query_encoder = self._query_model(query)       
-        candidate_encoder = self._candidate_model(features)
+        query_encoder = self.query_model(query)
+        candidate_encoder = self.candidate_model(features)
 
-        return self._task(query_encoder, candidate_encoder, compute_metrics=True)
+        return self._task(query_encoder, candidate_encoder, compute_metrics=not training)
 
     
 def create_model(batch_size, embedding_dimension, config):

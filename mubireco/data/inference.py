@@ -74,8 +74,9 @@ class InferenceDataset(DataPrep):
             ratings.user_id = shifted_last_rating.user_id
             AND ratings.movie_id = shifted_last_rating.movie_id
     )
-    SELECT * FROM sequenced_rating --where ARRAY_LENGTH(previous_movie_ids) > 2
-    WHERE rating_timestamp_utc = last_rating_timestamp"""
+    SELECT * FROM sequenced_rating
+    WHERE ARRAY_LENGTH(previous_movie_ids) > 2
+        AND rating_timestamp_utc = last_rating_timestamp"""
 
     def __init__(self, configuration, **kwargs):
         super().__init__(configuration, **kwargs)

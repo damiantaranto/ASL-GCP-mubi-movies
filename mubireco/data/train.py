@@ -74,8 +74,10 @@ class TrainDataset(DataPrep):
             ratings.user_id = shifted_last_rating.user_id
             AND ratings.movie_id = shifted_last_rating.movie_id
     )
-    SELECT * FROM sequenced_rating --where ARRAY_LENGTH(previous_movie_ids) > 2
-    WHERE ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 100)) IN (10, 20, 30, 40)"""
+    SELECT * FROM sequenced_rating 
+    WHERE
+        ARRAY_LENGTH(previous_movie_ids) > 2
+        AND ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 100)) IN (10, 20, 30, 40)"""
 
     def __init__(self, configuration, **kwargs):
         super().__init__(configuration, **kwargs)
@@ -91,6 +93,7 @@ class TrainDataset(DataPrep):
     def get_features_dict(self, rows) -> dict:
         dict_features = dict(
             **rows[["movie_id"]].astype("int"),
+            **rows[["user_id"]].astype("int"),
             **rows[["user_eligible_for_trial"]].astype("int"),
             **rows[["user_has_payment_method"]].astype("int"),
             **rows[["user_subscriber"]].astype("int"),
