@@ -1,9 +1,12 @@
 import time
 import argparse
 import tensorflow as tf
+import tensorflow_recommenders as tfrs
+import tempfile
 
 from mubireco.data.train import TrainDataset
 from mubireco.data.validation import ValidationDataset
+from mubireco.data.inference import InferenceDataset
 
 from mubireco.utils.configuration import Configuration
 
@@ -15,6 +18,7 @@ def train_and_evaluate(hparams):
 
     ds_train = TrainDataset(config).read_tf_dataset()
     ds_val = ValidationDataset(config).read_tf_dataset()
+    ds_inf = InferenceDataset(config).read_tf_dataset()
 
     batch_size = hparams["batch_size"]  # 10000
     num_evals = hparams["num_evals"]  # 100
@@ -23,7 +27,7 @@ def train_and_evaluate(hparams):
     timestamp = hparams["timestamp"]
     embedding_dim = hparams["embedding_dim"]
 
-    cached_train = ds_train.shuffle(10_000, seed=42).batch(batch_size).cache()
+    cached_train = ds_train.shuffle(10_000, seed=42).batch(batch_size).repeat().cache()
     cached_val = ds_val.batch(batch_size).cache()
 
     steps_per_epoch = len(ds_train) // (batch_size * num_evals)
@@ -45,18 +49,33 @@ def train_and_evaluate(hparams):
         model = create_model(batch_size, embedding_dim, config)
         model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=lr))
 
+    options = tf.data.Options()
+    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF
+    cached_train = cached_train.with_options(options)
+    cached_val = cached_val.with_options(options)
+    
     start = time.time()
     history = model.fit(
         cached_train,
-        validation_data=cached_val,
+        # validation_data=cached_val,
         steps_per_epoch=steps_per_epoch,
         epochs=num_evals,
         verbose=1,  # 0=silent, 1=progress bar, 2=one line per epoch
-        callbacks=[checkpoint_cb, tensorboard_cb, early_stopping_cb],
+        callbacks=[checkpoint_cb, tensorboard_cb]#, early_stopping_cb],
     )
     print("Training time with single GPUs: {}".format(time.time() - start))
+
+    index = tfrs.layers.factorized_top_k.BruteForce(model.query_model)
     
-    model.save(f"gs://{bucket_name}/{timestamp}/models")
+    index.index_from_dataset(
+      tf.data.Dataset.zip((ds_inf.map(lambda x: x["user_id"]).batch(batch_size), ds_inf.batch(batch_size).map(model.candidate_model)))
+    )
+    
+    with tempfile.TemporaryDirectory() as tmp:
+        path = f"gs://{bucket_name}/{timestamp}/models"
+
+        # Save the index.
+        tf.saved_model.save(index, path)
 
 
 if __name__ == "__main__":
