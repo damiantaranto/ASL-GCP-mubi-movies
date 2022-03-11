@@ -1,39 +1,26 @@
-import json
-import pathlib
-
 from kfp.v2 import compiler, dsl
 from google_cloud_pipeline_components.experimental.custom_job.utils import (
     create_custom_training_job_op_from_component,
 )
-from pipeline import generate_query
 
-from pipeline.kfp_components.tensorflow import train_tensorflow_model
+from pipeline.kfp_components.preprocessing.movies import movies_dataset
+
 
 @dsl.pipeline(name="tensorflow-train-pipeline")
 def tensorflow_pipeline(
-    project_id: str,
-    project_location: str,
-    ingestion_project_id: str,
-    tfdv_schema_path: str,
-    tfdv_train_stats_path: str,
-    train_script_path: str,
-    model_name: str,
-    scheduled_time: str,
-    dataset_id: str = "preprocessing",
-    dataset_location: str = "US",
-    ingestion_dataset_id: str = ""
+        project_id: str,
+        timestamp: str,
+        model_name: str,
 ):
     # Create variables to ensure the same arguments are passed
     # into different components of the pipeline
-    ingestion_table = "taxi_trips"
-    table_suffix = "_tf"  # suffix to table names
-    ingested_table = "ingested_data" + table_suffix
 
-    queries_folder = pathlib.Path(__file__).parent / "queries"
+    artifact_store = "gs://{model}-kfp-artifact-store".format(model=model_name)
 
-    ingest_query = generate_query(
-        queries_folder / "ingest.sql",
-        source_dataset=f"{ingestion_project_id}"
+    movie_query = movies_dataset(
+        project_id=project_id,
+        data_root="gs://{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
+        movies_output_filename="movies_mubi.tfdataset"
     )
 
 
@@ -51,10 +38,11 @@ def compile():
         type_check=False,
     )
 
+
 if __name__ == "__main__":
-    custom_train_job = create_custom_training_job_op_from_component(
-        component_spec=train_tensorflow_model,
-        replica_count=1,
-        machine_type="n1-standard-4",
-    )
+    # custom_train_job = create_custom_training_job_op_from_component(
+    #     component_spec=tensorflow_pipeline,
+    #     replica_count=1,
+    #     machine_type="n1-standard-4",
+    # )
     compile()

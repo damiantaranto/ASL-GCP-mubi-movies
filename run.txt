@@ -1,0 +1,9 @@
+export PIPELINE_FILES_GCS_PATH=gs://movie_pipeline_staging/pipelines
+export VERTEX_LOCATION=us-central1
+export VERTEX_PIPELINE_ROOT=gs://movie_pipeline_vertex-root
+export VERTEX_PROJECT_ID=qwiklabs-gcp-04-424f1fdacc59
+export VERTEX_SA_EMAIL=728266312506-compute@developer.gserviceaccount.com
+
+python -m pipeline.main
+
+python trigger.py --payload=./pipeline/config/config.json
