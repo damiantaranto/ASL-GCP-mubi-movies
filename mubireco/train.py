@@ -91,5 +91,4 @@ if __name__ == "__main__":
     args, _ = parser.parse_known_args()
 
     hparams = args.__dict__
-    print("output_dir", hparams["output_dir"])
     train_and_evaluate(hparams)
