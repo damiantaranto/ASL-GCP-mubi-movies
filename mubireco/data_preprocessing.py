@@ -8,7 +8,6 @@ from mubireco.utils.configuration import Configuration
 from mubireco.utils.logging import get_or_create_logger
 
 from mubireco.data.train import TrainDataset
-from mubireco.data.validation import ValidationDataset
 from mubireco.data.inference import InferenceDataset
 from mubireco.data.movies import MoviesDataset
 
@@ -34,9 +33,6 @@ if __name__ == "__main__":
     start = time.time()
     logger.info("Train dataset creation")
     TrainDataset(config, seq_length=args.seq_length).run()
-
-    logger.info("Validation dataset creation")
-    ValidationDataset(config, seq_length=args.seq_length).run()
 
     logger.info("Inference dataset creation")
     InferenceDataset(config, seq_length=args.seq_length).run()
