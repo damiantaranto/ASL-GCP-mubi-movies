@@ -3,7 +3,7 @@ from pipeline.kfp_components.dependencies import PYTHON37, GOOGLE_CLOUD_BIGQUERY
 
 
 @component(base_image=PYTHON37, packages_to_install=[GOOGLE_CLOUD_BIGQUERY, TENSORFLOW, PANDAS, PYARROW])
-def train_dataset(
+def inference_dataset(
         project_id: str,
         data_root: str,
         movies_output_filename: str,
@@ -13,9 +13,9 @@ def train_dataset(
     import pandas as pd
     import tensorflow as tf
 
-    name_transformation = "train"
+    name_transformation = "inference"
 
-    sql_query = """WITH ratings AS (
+    sql_query = f"""WITH ratings AS (
         SELECT
             ratings.user_id,
             ratings.movie_id,
@@ -80,8 +80,10 @@ def train_dataset(
             ratings.user_id = shifted_last_rating.user_id
             AND ratings.movie_id = shifted_last_rating.movie_id
     )
-    SELECT * FROM sequenced_rating --where ARRAY_LENGTH(previous_movie_ids) > 2
-    WHERE ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 100)) IN (10, 20, 30, 40)"""
+    SELECT * FROM sequenced_rating
+    WHERE ARRAY_LENGTH(previous_movie_ids) > 2
+        AND rating_timestamp_utc = last_rating_timestamp"""
+
 
     data_path = os.path.join(data_root, name_transformation)
 
@@ -102,7 +104,7 @@ def train_dataset(
 
     def get_features_dict(self, rows) -> dict:
         dict_features = dict(
-            **rows[["movie_id"]].astype("int"),
+            **rows[["user_id"]].astype("int"),
             **rows[["user_eligible_for_trial"]].astype("int"),
             **rows[["user_has_payment_method"]].astype("int"),
             **rows[["user_subscriber"]].astype("int"),
@@ -130,8 +132,8 @@ def train_dataset(
     sql_query = (
         sql_query
             .replace("__DATASET_ID__", str("mubi_movie_data"))
-            .replace("__FRAME_START__", str("10"))
-            .replace("__FRAME_END__", str("1"))
+            .replace("__FRAME_START__", str("9"))
+            .replace("__FRAME_END__", str("0"))
     )
 
     rows = load_dataset(sql_query)

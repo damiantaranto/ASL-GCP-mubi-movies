@@ -4,6 +4,9 @@ from google_cloud_pipeline_components.experimental.custom_job.utils import (
 )
 
 from pipeline.kfp_components.preprocessing.movies import movies_dataset
+from pipeline.kfp_components.preprocessing.train_dataset import train_dataset
+from pipeline.kfp_components.preprocessing.val_dataset import val_dataset
+from pipeline.kfp_components.preprocessing.inference_dataset import inference_dataset
 
 
 @dsl.pipeline(name="tensorflow-train-pipeline")
@@ -21,6 +24,24 @@ def tensorflow_pipeline(
         project_id=project_id,
         data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
         movies_output_filename="movies_mubi.tfdataset"
+    )
+
+    train_query = train_dataset(
+        project_id=project_id,
+        data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
+        movies_output_filename="train_mubi.tfdataset"
+    )
+
+    val_query = val_dataset(
+        project_id=project_id,
+        data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
+        movies_output_filename="val_mubi.tfdataset"
+    )
+
+    inference_query = inference_dataset(
+        project_id=project_id,
+        data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
+        movies_output_filename="inference_mubi.tfdataset"
     )
 
 
