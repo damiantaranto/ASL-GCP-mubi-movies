@@ -91,6 +91,7 @@ class InferenceDataset(DataPrep):
 
     def get_features_dict(self, rows) -> dict:
         dict_features = dict(
+            **rows[["user_id"]].astype("int"),
             **rows[["user_eligible_for_trial"]].astype("int"),
             **rows[["user_has_payment_method"]].astype("int"),
             **rows[["user_subscriber"]].astype("int"),
