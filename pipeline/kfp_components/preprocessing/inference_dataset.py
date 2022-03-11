@@ -7,6 +7,7 @@ def inference_dataset(
         project_id: str,
         data_root: str,
         movies_output_filename: str,
+        seq_length: int,
 ):
     import os
     from google.cloud import bigquery
@@ -102,7 +103,7 @@ def inference_dataset(
 
         tf.data.experimental.save(dataset, output_path)
 
-    def get_features_dict(self, rows) -> dict:
+    def get_features_dict(rows) -> dict:
         dict_features = dict(
             **rows[["user_id"]].astype("int"),
             **rows[["user_eligible_for_trial"]].astype("int"),
@@ -111,16 +112,16 @@ def inference_dataset(
             **rows[["user_trialist"]].astype("int"),
             **{"previous_movie_ids":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_ids"].values,
-                                                              maxlen=self.seq_length, dtype='int32', value=0)},
+                                                              maxlen=seq_length, dtype='int32', value=0)},
             **{"previous_movie_years":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_years"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=1980.0)},
+                                                              maxlen=seq_length, dtype='float32', value=1980.0)},
             **{"previous_score":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_score"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=2.5)},
+                                                              maxlen=seq_length, dtype='float32', value=2.5)},
             **{"previous_days_since_last_rating":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_days_since_last_rating"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=0)}
+                                                              maxlen=seq_length, dtype='float32', value=0)}
         )
         return dict_features
 
@@ -132,8 +133,8 @@ def inference_dataset(
     sql_query = (
         sql_query
             .replace("__DATASET_ID__", str("mubi_movie_data"))
-            .replace("__FRAME_START__", str("9"))
-            .replace("__FRAME_END__", str("0"))
+            .replace("__FRAME_START__", str(9))
+            .replace("__FRAME_END__", str(0))
     )
 
     rows = load_dataset(sql_query)

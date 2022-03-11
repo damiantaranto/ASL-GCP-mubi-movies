@@ -3,6 +3,9 @@ from google_cloud_pipeline_components.experimental.custom_job.utils import (
     create_custom_training_job_op_from_component,
 )
 
+import datetime
+
+
 from pipeline.kfp_components.preprocessing.movies import movies_dataset
 from pipeline.kfp_components.preprocessing.train_dataset import train_dataset
 from pipeline.kfp_components.preprocessing.val_dataset import val_dataset
@@ -12,13 +15,14 @@ from pipeline.kfp_components.preprocessing.inference_dataset import inference_da
 @dsl.pipeline(name="tensorflow-train-pipeline")
 def tensorflow_pipeline(
         project_id: str,
-        timestamp: str,
         model_name: str,
+        seq_length: int,
 ):
     # Create variables to ensure the same arguments are passed
     # into different components of the pipeline
 
     artifact_store = "gs://{model}-kfp-artifact-store".format(model=model_name)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
 
     movie_query = movies_dataset(
         project_id=project_id,
@@ -29,19 +33,22 @@ def tensorflow_pipeline(
     train_query = train_dataset(
         project_id=project_id,
         data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
-        movies_output_filename="train_mubi.tfdataset"
+        movies_output_filename="train_mubi.tfdataset",
+        seq_length=seq_length
     )
 
     val_query = val_dataset(
         project_id=project_id,
         data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
-        movies_output_filename="val_mubi.tfdataset"
+        movies_output_filename="val_mubi.tfdataset",
+        seq_length=seq_length
     )
 
     inference_query = inference_dataset(
         project_id=project_id,
         data_root="{artifact}/{time}/data".format(artifact=artifact_store, time=timestamp),
-        movies_output_filename="inference_mubi.tfdataset"
+        movies_output_filename="inference_mubi.tfdataset",
+        seq_length=seq_length
     )
 
 

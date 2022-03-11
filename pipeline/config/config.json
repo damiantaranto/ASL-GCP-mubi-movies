@@ -7,6 +7,6 @@
     "data": {
         "project_id": "qwiklabs-gcp-04-424f1fdacc59",
         "model_name": "mubi-reco",
-        "timestamp": "20220308134842"
+        "seq_length": 10
     }
 }
