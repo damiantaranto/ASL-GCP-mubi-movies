@@ -11,7 +11,7 @@ class CandidateEncoder(tf.keras.layers.Layer):
         super().__init__()
         self._embedding_model = tf.keras.Sequential([
             tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),
-            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension), 
+            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension),
         ])
 
         self._norm_model_years = tf.keras.layers.LayerNormalization(axis=-1)
@@ -24,7 +24,7 @@ class CandidateEncoder(tf.keras.layers.Layer):
             "user_trialist": tf.feature_column.numeric_column("user_trialist"),
         }
 
-        self._gru_encoder = tf.keras.layers.GRU(units=embedding_dimension, recurrent_initializer="glorot_uniform",)
+        self._gru_encoder = tf.keras.layers.GRU(units=embedding_dimension, recurrent_initializer="glorot_uniform")
 
         self._dense_model = tf.keras.Sequential([
             tf.keras.layers.DenseFeatures(self._feature_columns.values()),
@@ -35,7 +35,6 @@ class CandidateEncoder(tf.keras.layers.Layer):
         self._proj_layer = tf.keras.layers.Dense(embedding_dimension, activation="relu")
 
     def call(self, features):
-
         seq_embedding = self._embedding_model(features["previous_movie_ids"])
         seq_scores = tf.expand_dims(self._norm_model_scores(features["previous_score"]), -1)
 
@@ -49,7 +48,7 @@ class CandidateEncoder(tf.keras.layers.Layer):
 
         return proj_layer
 
-    
+
 class MubiMoviesModel(tfrs.Model):
 
     def __init__(self, task, candidate_model, query_model):
@@ -68,22 +67,23 @@ class MubiMoviesModel(tfrs.Model):
 
         return self._task(query_encoder, candidate_encoder, compute_metrics=not training)
 
-    
-def create_model(batch_size, embedding_dimension, config):
 
+def create_model(batch_size, embedding_dimension, config):
     df_movies = MoviesDataset(config).read_tf_dataset()
     ds_train = TrainDataset(config).read_tf_dataset()
     unique_movie_ids = np.unique(np.concatenate(list(df_movies.batch(batch_size).map(lambda x: x["movie_id"]))))
+    unique_user_ids = np.unique(np.concatenate(list(ds_train.batch(batch_size).map(lambda x: x["user_id"]))))
 
     query_model = tf.keras.Sequential([
-      tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),
-      tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension)
+        tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),
+        tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension)
     ])
 
     candidate_model = CandidateEncoder(unique_movie_ids, embedding_dimension)
 
     metrics = tfrs.metrics.FactorizedTopK(
-        candidates=ds_train.batch(batch_size).map(candidate_model)
+        candidates=ds_train.batch(batch_size).map(candidate_model),
+        metrics=[tf.keras.metrics.TopKCategoricalAccuracy(k=100, name=f"factorized_top_k/top_100_categorical_accuracy")]
     )
 
     task = tfrs.tasks.Retrieval(
