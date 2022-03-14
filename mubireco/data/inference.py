@@ -98,16 +98,16 @@ class InferenceDataset(DataPrep):
             **rows[["user_trialist"]].astype("int"),
             **{"previous_movie_ids":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_ids"].values,
-                                                              maxlen=self.seq_length, dtype='int32', value=0)},
+                                                              maxlen=self.seq_length, dtype='int32', value=0, padding='post')},
             **{"previous_movie_years":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_movie_years"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=1980.0)},
+                                                              maxlen=self.seq_length, dtype='float32', value=1980.0, padding='post')},
             **{"previous_score":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_score"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=2.5)},
+                                                              maxlen=self.seq_length, dtype='float32', value=2.5, padding='post')},
             **{"previous_days_since_last_rating":
                 tf.keras.preprocessing.sequence.pad_sequences(rows["previous_days_since_last_rating"].values,
-                                                              maxlen=self.seq_length, dtype='float32', value=0)}
+                                                              maxlen=self.seq_length, dtype='float32', value=0, padding='post')}
         )
         return dict_features
 
