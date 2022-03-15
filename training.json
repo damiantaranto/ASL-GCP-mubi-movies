@@ -54,25 +54,6 @@
             }
           }
         }
-      },
-      "comp-val-dataset": {
-        "executorLabel": "exec-val-dataset",
-        "inputDefinitions": {
-          "parameters": {
-            "data_root": {
-              "type": "STRING"
-            },
-            "movies_output_filename": {
-              "type": "STRING"
-            },
-            "project_id": {
-              "type": "STRING"
-            },
-            "seq_length": {
-              "type": "INT"
-            }
-          }
-        }
       }
     },
     "deploymentSpec": {
@@ -136,26 +117,6 @@
             ],
             "image": "python:3.8"
           }
-        },
-        "exec-val-dataset": {
-          "container": {
-            "args": [
-              "--executor_input",
-              "{{$}}",
-              "--function_to_execute",
-              "val_dataset"
-            ],
-            "command": [
-              "sh",
-              "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'google-cloud-bigquery==2.34.2' 'tensorflow==2.6.2' 'pandas==1.3.2' 'pyarrow==7.0.0' 'kfp==1.8.10' && \"$0\" \"$@\"\n",
-              "sh",
-              "-ec",
-              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef val_dataset(\n        project_id: str,\n        data_root: str,\n        movies_output_filename: str,\n        seq_length: int,\n):\n    import os\n    from google.cloud import bigquery\n    import pandas as pd\n    import tensorflow as tf\n\n    name_transformation = \"validation\"\n\n    sql_query = f\"\"\"WITH ratings AS (\n        SELECT\n            ratings.user_id,\n            ratings.movie_id,\n            ratings.rating_id,\n            ratings.rating_timestamp_utc,\n            ratings.rating_score,\n            COALESCE(ratings.user_eligible_for_trial, False) AS user_eligible_for_trial,\n            COALESCE(ratings.user_has_payment_method, False) AS user_has_payment_method,\n            COALESCE(ratings.user_subscriber, False) AS user_subscriber,\n            COALESCE(ratings.user_trialist, False) AS user_trialist,\n            movies.movie_title,\n            COALESCE(ratings.rating_score,\n             PERCENTILE_DISC(ratings.rating_score, 0.5) OVER (PARTITION BY ratings.movie_id)) AS rating_value,\n            COALESCE(DATE_DIFF(ratings.rating_timestamp_utc, LAG(ratings.rating_timestamp_utc, 1)\n                OVER (PARTITION BY user_id ORDER BY ratings.rating_timestamp_utc),  DAY), -1) AS days_since_last_rating,\n            COALESCE(movies.movie_release_year, 0) as movie_release_year,\n            movies.movie_title_language,\n            LAST_VALUE(ratings.rating_timestamp_utc) OVER (PARTITION BY user_id\n                ORDER BY ratings.rating_timestamp_utc\n                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_rating_timestamp\n        FROM `__DATASET_ID__.mubi_ratings_data` ratings\n        JOIN `__DATASET_ID__.mubi_movie_data` movies ON\n            ratings.movie_id = movies.movie_id\n            AND ratings.rating_score IS NOT NULL\n    ),\n    shifted_last_rating AS (\n         SELECT\n             ratings.user_id,\n             ratings.movie_id,\n             COALESCE(LAG(ratings.days_since_last_rating, 1) over (PARTITION BY user_id\n                ORDER BY ratings.days_since_last_rating DESC), 0) as shifted_days,\n         FROM ratings\n    ),\n    sequenced_rating AS (\n        SELECT\n            movie_title,\n            ratings.movie_id,\n            ratings.user_id,\n            rating_value,\n            movie_release_year,\n            rating_timestamp_utc,\n            user_eligible_for_trial,\n            days_since_last_rating,\n            user_has_payment_method,\n            user_subscriber,\n            user_trialist,\n            last_rating_timestamp,\n            ARRAY_AGG(ratings.movie_id) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_ids,\n            ARRAY_AGG(movie_release_year) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_years,\n            ARRAY_AGG(rating_value) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_score,\n            ARRAY_AGG(shifted_days) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_days_since_last_rating,\n        FROM ratings\n        INNER JOIN shifted_last_rating ON\n            ratings.user_id = shifted_last_rating.user_id\n            AND ratings.movie_id = shifted_last_rating.movie_id\n    )\n    SELECT * FROM (\n        SELECT * FROM sequenced_rating \n        WHERE ARRAY_LENGTH(previous_movie_ids) > 2\n    )\n    WHERE ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 1000)) IN (50, 60, 800, 250, 700)\"\"\"\n\n    data_path = os.path.join(data_root, name_transformation)\n\n    output_path = os.path.join(data_path, movies_output_filename)\n\n    def load_dataset(query) -> pd.DataFrame:\n        bq_client = bigquery.Client()\n        results = bq_client.query(query, project=project_id).to_dataframe()\n        return results\n\n    def save_tf_dataset(dict_features) -> None:\n        dataset = tf.data.Dataset.from_tensor_slices(dict_features)\n\n        if not tf.io.gfile.exists(data_path):\n            tf.io.gfile.makedirs(data_path)\n\n        tf.data.experimental.save(dataset, output_path)\n\n    def get_features_dict(rows) -> dict:\n        dict_features = dict(\n            **rows[[\"movie_id\"]].astype(\"int\"),\n            **rows[[\"user_id\"]].astype(\"int\"),\n            **rows[[\"user_eligible_for_trial\"]].astype(\"int\"),\n            **rows[[\"user_has_payment_method\"]].astype(\"int\"),\n            **rows[[\"user_subscriber\"]].astype(\"int\"),\n            **rows[[\"user_trialist\"]].astype(\"int\"),\n            **{\"previous_movie_ids\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_movie_ids\"].values,\n                                                              maxlen=seq_length, dtype='int32', value=0)},\n            **{\"previous_movie_years\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_movie_years\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=1980.0)},\n            **{\"previous_score\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_score\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=2.5)},\n            **{\"previous_days_since_last_rating\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_days_since_last_rating\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=0)}\n        )\n        return dict_features\n\n    try:\n        assert not tf.io.gfile.exists(output_path)\n    except AssertionError:\n        raise ValueError(\"Dataset already exists, load it. Remove timestamp from config in case of new run\")\n\n    sql_query = (\n        sql_query\n            .replace(\"__DATASET_ID__\", str(\"mubi_movie_data\"))\n            .replace(\"__FRAME_START__\", str(10))\n            .replace(\"__FRAME_END__\", str(1))\n    )\n\n    rows = load_dataset(sql_query)\n\n    dict_features = get_features_dict(rows)\n    del rows\n\n    save_tf_dataset(dict_features)\n\n"
-            ],
-            "image": "python:3.8"
-          }
         }
       }
     },
@@ -177,7 +138,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311201848/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315181324/data"
                     }
                   }
                 },
@@ -215,7 +176,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311201848/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315181324/data"
                     }
                   }
                 },
@@ -250,7 +211,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311201848/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315181324/data"
                     }
                   }
                 },
@@ -274,44 +235,6 @@
             },
             "taskInfo": {
               "name": "train-dataset"
-            }
-          },
-          "val-dataset": {
-            "cachingOptions": {
-              "enableCache": true
-            },
-            "componentRef": {
-              "name": "comp-val-dataset"
-            },
-            "inputs": {
-              "parameters": {
-                "data_root": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311201848/data"
-                    }
-                  }
-                },
-                "movies_output_filename": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "val_mubi.tfdataset"
-                    }
-                  }
-                },
-                "pipelineparam--model_name": {
-                  "componentInputParameter": "model_name"
-                },
-                "project_id": {
-                  "componentInputParameter": "project_id"
-                },
-                "seq_length": {
-                  "componentInputParameter": "seq_length"
-                }
-              }
-            },
-            "taskInfo": {
-              "name": "val-dataset"
             }
           }
         }

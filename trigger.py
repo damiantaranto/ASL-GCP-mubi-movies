@@ -52,6 +52,7 @@ def trigger_pipeline(
     pl.submit(
         service_account=service_account,
     )
+    # pl.submit()
 
     return pl
 

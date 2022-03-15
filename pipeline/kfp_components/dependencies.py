@@ -15,6 +15,7 @@ TF_TRAINING_CONTAINER_IMAGE_URI = (
 
 # TF specific
 TENSORFLOW = "tensorflow==2.6.2"
+TENSORFLOW_RECOMMENDERS = "tensorflow-recommenders==0.6.0"
 
 # Google SDK specific
 GOOGLE_CLOUD_BIGQUERY = "google-cloud-bigquery==2.34.2"
