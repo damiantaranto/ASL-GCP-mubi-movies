@@ -7,7 +7,6 @@ import datetime
 
 from pipeline.kfp_components.preprocessing.movies import movies_dataset
 from pipeline.kfp_components.preprocessing.train_dataset import train_dataset
-from pipeline.kfp_components.preprocessing.val_dataset import val_dataset
 from pipeline.kfp_components.preprocessing.inference_dataset import inference_dataset
 
 from pipeline.kfp_components.tensorflow.train import train_tensorflow_model
@@ -52,7 +51,7 @@ def tensorflow_pipeline(
     )
 
     # train_model = train_tensorflow_model(
-    #     data_root="{artifact}{time}/data".format(artifact=artifact_store, time=timestamp),
+    #     data_root="{artifact}{time}/model".format(artifact=artifact_store, time=timestamp),
     #     movies_output_filename="movies_mubi.tfdataset",
     #     train_output_filename="train_mubi.tfdataset",
     #     inference_output_filename="inference_mubi.tfdataset",
@@ -63,24 +62,20 @@ def tensorflow_pipeline(
     #     # location="us-central1",
     # ).after(inference_query, movie_query, train_query)
 
-    # train_model = (
-    #     custom_train_job(
-    #         data_root="{artifact}{time}/data".format(artifact=artifact_store, time=timestamp),
-    #         movies_output_filename="movies_mubi.tfdataset",
-    #         train_output_filename="train_mubi.tfdataset",
-    #         inference_output_filename="inference_mubi.tfdataset",
-    #         timestamp=timestamp,
-    #         artifact_store=artifact_store,
-    #         # Training wrapper specific parameters
-    #         project=project_id,
-    #         location="us-central1",
-    #     )
-    #         .after(inference_query, movie_query, train_query)
-    #         .set_display_name("Vertex Training for TF model")
-    # )
-
-
-
+    train_model = (
+        custom_train_job(
+            data_root="{artifact}{time}/data".format(artifact=artifact_store, time=timestamp),
+            movies_output_filename="movies_mubi.tfdataset",
+            train_output_filename="train_mubi.tfdataset",
+            inference_output_filename="inference_mubi.tfdataset",
+            artifact_store=artifact_store,
+            # Training wrapper specific parameters
+            project=project_id,
+            location="us-central1",
+        )
+            .after(inference_query, movie_query, train_query)
+            .set_display_name("Vertex Training for TF model")
+    )
 
 def compile():
     """
@@ -98,9 +93,9 @@ def compile():
 
 
 if __name__ == "__main__":
-    # custom_train_job = create_custom_training_job_op_from_component(
-    #     component_spec=train_tensorflow_model,
-    #     replica_count=1,
-    #     machine_type="n1-standard-4",
-    # )
+    custom_train_job = create_custom_training_job_op_from_component(
+        component_spec=train_tensorflow_model,
+        replica_count=1,
+        machine_type="n1-standard-4",
+    )
     compile()

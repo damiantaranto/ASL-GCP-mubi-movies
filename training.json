@@ -54,6 +54,53 @@
             }
           }
         }
+      },
+      "comp-train-tensorflow-model": {
+        "executorLabel": "exec-train-tensorflow-model",
+        "inputDefinitions": {
+          "parameters": {
+            "artifact_store": {
+              "type": "STRING"
+            },
+            "base_output_directory": {
+              "type": "STRING"
+            },
+            "data_root": {
+              "type": "STRING"
+            },
+            "inference_output_filename": {
+              "type": "STRING"
+            },
+            "location": {
+              "type": "STRING"
+            },
+            "movies_output_filename": {
+              "type": "STRING"
+            },
+            "network": {
+              "type": "STRING"
+            },
+            "project": {
+              "type": "STRING"
+            },
+            "service_account": {
+              "type": "STRING"
+            },
+            "tensorboard": {
+              "type": "STRING"
+            },
+            "train_output_filename": {
+              "type": "STRING"
+            }
+          }
+        },
+        "outputDefinitions": {
+          "parameters": {
+            "gcp_resources": {
+              "type": "STRING"
+            }
+          }
+        }
       }
     },
     "deploymentSpec": {
@@ -117,6 +164,29 @@
             ],
             "image": "python:3.8"
           }
+        },
+        "exec-train-tensorflow-model": {
+          "container": {
+            "args": [
+              "--type",
+              "CustomJob",
+              "--payload",
+              "{\"display_name\": \"Train tensorflow model\", \"job_spec\": {\"worker_pool_specs\": [{\"machine_spec\": {\"machine_type\": \"n1-standard-4\"}, \"replica_count\": 1, \"container_spec\": {\"image_uri\": \"python:3.8\", \"command\": [\"sh\", \"-c\", \"\\nif ! [ -x \\\"$(command -v pip)\\\" ]; then\\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\\nfi\\n\\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'tensorflow==2.6.2' 'tensorflow-recommenders==0.6.0' 'kfp==1.8.10' && \\\"$0\\\" \\\"$@\\\"\\n\", \"sh\", \"-ec\", \"program_path=$(mktemp -d)\\nprintf \\\"%s\\\" \\\"$0\\\" > \\\"$program_path/ephemeral_component.py\\\"\\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \\\"$program_path/ephemeral_component.py\\\"                         \\\"$@\\\"\\n\", \"\\nimport kfp\\nfrom kfp.v2 import dsl\\nfrom kfp.v2.dsl import *\\nfrom typing import *\\n\\ndef train_tensorflow_model(\\n    data_root: str,\\n    movies_output_filename: str,\\n    train_output_filename: str,\\n    inference_output_filename: str,\\n    artifact_store: str,\\n):\\n    import os\\n    import json\\n    import datetime\\n    import tensorflow as tf\\n    import numpy as np\\n    import tensorflow_recommenders as tfrs\\n    import time\\n    import subprocess\\n    import sys\\n    import tempfile\\n\\n    batch_size = 10000\\n    num_evals = 100\\n    lr = 0.1\\n    timestamp_train = datetime.datetime.now().strftime(\\\"%Y%m%d%H%M%S\\\")\\n    embedding_dim = 32\\n    num_test_sample = 1000\\n    output_dir = os.path.join(artifact_store, timestamp_train)\\n\\n    movies_output_path = os.path.join(data_root, \\\"movies\\\", movies_output_filename)\\n    train_output_path = os.path.join(data_root, \\\"train\\\", train_output_filename)\\n    inference_output_path = os.path.join(data_root, \\\"inference\\\", inference_output_filename)\\n\\n    def read_tf_dataset(output_path) -> tf.data.Dataset:\\n        return tf.data.experimental.load(output_path)\\n\\n    def CandidateEncoder(unique_movie_ids, embedding_dimension, features):\\n        embedding_movie_ids = tf.keras.Sequential([\\n            tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),\\n            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension),\\n        ])\\n\\n        gru_encoder = tf.keras.layers.GRU(units=embedding_dimension, recurrent_initializer=\\\"glorot_uniform\\\")\\n\\n        seq_embedding_movie_ids = embedding_movie_ids(features[\\\"previous_movie_ids\\\"])\\n\\n        encoder = gru_encoder(seq_embedding_movie_ids)\\n\\n        return encoder\\n\\n\\n    def MubiMoviesModel(task, candidate_model, query_model, features, training=False):\\n        query = features.pop(\\\"movie_id\\\")\\n\\n        query_encoder = query_model(query)\\n        candidate_encoder = candidate_model(features)\\n\\n        return task(query_encoder, candidate_encoder, compute_metrics=not training)\\n\\n\\n\\n    def create_model(batch_size, embedding_dimension):\\n        df_movies = read_tf_dataset(movies_output_path)\\n        ds_train = read_tf_dataset(train_output_path)\\n        unique_movie_ids = np.unique(np.concatenate(list(df_movies.batch(batch_size).map(lambda x: x[\\\"movie_id\\\"]))))\\n\\n        query_model = tf.keras.Sequential([\\n            tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),\\n            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension)\\n        ])\\n\\n        candidate_model = CandidateEncoder(unique_movie_ids, embedding_dimension)\\n\\n        metrics = tfrs.metrics.FactorizedTopK(\\n            candidates=ds_train.batch(batch_size).map(candidate_model),\\n            metrics=[\\n                tf.keras.metrics.TopKCategoricalAccuracy(k=100, name=f\\\"factorized_top_k/top_100_categorical_accuracy\\\")]\\n        )\\n\\n        task = tfrs.tasks.Retrieval(\\n            metrics=metrics\\n        )\\n\\n        return MubiMoviesModel(task, candidate_model, query_model)\\n\\n    ds_train = read_tf_dataset(train_output_path)\\n    ds_inf = read_tf_dataset(inference_output_path)\\n\\n    num_train_sample = len(ds_train) - num_test_sample\\n\\n    tf.random.set_seed(42)\\n    ds_train = ds_train.shuffle(100_000, seed=42, reshuffle_each_iteration=False)\\n\\n    ds_train_shuffled = ds_train.take(num_train_sample)\\n    ds_val_shuffled = ds_train.skip(num_train_sample)\\n\\n    cached_train = ds_train_shuffled.batch(batch_size).repeat().cache()\\n    cached_val = ds_val_shuffled.batch(batch_size).cache()\\n\\n    steps_per_epoch = len(ds_train) // (batch_size * num_evals)\\n\\n    checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(\\n        os.path.join(output_dir, \\\"checkpoints\\\"), save_weights_only=True, verbose=1\\n    )\\n    tensorboard_cb = tf.keras.callbacks.TensorBoard(\\n        os.path.join(output_dir, \\\"tensorboard\\\"), histogram_freq=1\\n    )\\n\\n    early_stopping_cb = tf.keras.callbacks.EarlyStopping(patience=10,\\n                                                         monitor=\\\"factorized_top_k/top_100_categorical_accuracy\\\")\\n\\n    # For MirroredStrategy #\\n    strategy = tf.distribute.MirroredStrategy()\\n\\n    with strategy.scope():\\n        # End #\\n        model = create_model(batch_size, embedding_dim)\\n        model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=lr))\\n\\n    options = tf.data.Options()\\n    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF\\n    cached_train = cached_train.with_options(options)\\n    cached_val = cached_val.with_options(options)\\n\\n    start = time.time()\\n    history = model.fit(\\n        cached_train,\\n        # validation_data=cached_val,\\n        steps_per_epoch=steps_per_epoch,\\n        epochs=num_evals,\\n        verbose=1,  # 0=silent, 1=progress bar, 2=one line per epoch\\n        callbacks=[checkpoint_cb, tensorboard_cb]  # , early_stopping_cb],\\n    )\\n    print(\\\"Training time with single GPUs: {}\\\".format(time.time() - start))\\n\\n    results = model.evaluate(cached_val, return_dict=True)\\n\\n    filename_results = \\\"eval_results.json\\\"\\n    with open(filename_results, \\\"w\\\") as f:\\n        json.dump(results, f)\\n    gcs_model_path = os.path.join(output_dir, filename_results)\\n    subprocess.check_call([\\\"gsutil\\\", \\\"cp\\\", filename_results, gcs_model_path], stderr=sys.stdout)\\n    print(f\\\"Saved model in: {gcs_model_path}\\\")\\n\\n    index = tfrs.layers.factorized_top_k.BruteForce(model.query_model)\\n\\n    index.index_from_dataset(\\n        tf.data.Dataset.zip(\\n            (ds_inf.map(lambda x: x[\\\"user_id\\\"]).batch(batch_size),\\n             ds_inf.batch(batch_size).map(model.candidate_model)))\\n    )\\n\\n    # example, to keep otherwise bug in saved model\\n    _, _ = index(tf.constant([42]))\\n\\n    with tempfile.TemporaryDirectory() as tmp:\\n        # Save the index.\\n        tf.saved_model.save(index, os.path.join(output_dir, \\\"models\\\"))\\n\\n\"], \"args\": [\"--executor_input\", \"{{$.json_escape[1]}}\", \"--function_to_execute\", \"train_tensorflow_model\"]}, \"disk_spec\": {\"boot_disk_type\": \"pd-ssd\", \"boot_disk_size_gb\": 100}}], \"service_account\": \"{{$.inputs.parameters['service_account']}}\", \"network\": \"{{$.inputs.parameters['network']}}\", \"tensorboard\": \"{{$.inputs.parameters['tensorboard']}}\", \"base_output_directory\": {\"output_uri_prefix\": \"{{$.inputs.parameters['base_output_directory']}}\"}}}",
+              "--project",
+              "{{$.inputs.parameters['project']}}",
+              "--location",
+              "{{$.inputs.parameters['location']}}",
+              "--gcp_resources",
+              "{{$.outputs.parameters['gcp_resources'].output_file}}"
+            ],
+            "command": [
+              "python3",
+              "-u",
+              "-m",
+              "google_cloud_pipeline_components.container.experimental.gcp_launcher.launcher"
+            ],
+            "image": "gcr.io/ml-pipeline/google-cloud-pipeline-components:0.2.1"
+          }
         }
       }
     },
@@ -138,7 +208,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315181324/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
                     }
                   }
                 },
@@ -176,7 +246,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315181324/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
                     }
                   }
                 },
@@ -211,7 +281,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315181324/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
                     }
                   }
                 },
@@ -235,6 +305,102 @@
             },
             "taskInfo": {
               "name": "train-dataset"
+            }
+          },
+          "train-tensorflow-model": {
+            "cachingOptions": {
+              "enableCache": true
+            },
+            "componentRef": {
+              "name": "comp-train-tensorflow-model"
+            },
+            "dependentTasks": [
+              "inference-dataset",
+              "movies-dataset",
+              "train-dataset"
+            ],
+            "inputs": {
+              "parameters": {
+                "artifact_store": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/"
+                    }
+                  }
+                },
+                "base_output_directory": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": ""
+                    }
+                  }
+                },
+                "data_root": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
+                    }
+                  }
+                },
+                "inference_output_filename": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "inference_mubi.tfdataset"
+                    }
+                  }
+                },
+                "location": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "us-central1"
+                    }
+                  }
+                },
+                "movies_output_filename": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "movies_mubi.tfdataset"
+                    }
+                  }
+                },
+                "network": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": ""
+                    }
+                  }
+                },
+                "pipelineparam--model_name": {
+                  "componentInputParameter": "model_name"
+                },
+                "project": {
+                  "componentInputParameter": "project_id"
+                },
+                "service_account": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": ""
+                    }
+                  }
+                },
+                "tensorboard": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": ""
+                    }
+                  }
+                },
+                "train_output_filename": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "train_mubi.tfdataset"
+                    }
+                  }
+                }
+              }
+            },
+            "taskInfo": {
+              "name": "Vertex Training for TF model"
             }
           }
         }

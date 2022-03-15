@@ -8,7 +8,6 @@ def train_tensorflow_model(
     movies_output_filename: str,
     train_output_filename: str,
     inference_output_filename: str,
-    timestamp: str,
     artifact_store: str,
 ):
     import os
@@ -28,7 +27,7 @@ def train_tensorflow_model(
     timestamp_train = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     embedding_dim = 32
     num_test_sample = 1000
-    output_dir = os.path.join(artifact_store, timestamp, timestamp_train)
+    output_dir = os.path.join(artifact_store, timestamp_train)
 
     movies_output_path = os.path.join(data_root, "movies", movies_output_filename)
     train_output_path = os.path.join(data_root, "train", train_output_filename)
