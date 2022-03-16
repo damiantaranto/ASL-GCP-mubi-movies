@@ -1,89 +1,45 @@
 from kfp.v2.dsl import Artifact, Input, Output, Dataset, Model, component
-from pipeline.kfp_components.dependencies import PYTHON37, TENSORFLOW, TENSORFLOW_RECOMMENDERS
+from pipeline.kfp_components.dependencies import PYTHON37, TENSORFLOW, TENSORFLOW_RECOMMENDERS, PANDAS, GOOGLE_CLOUD_BIGQUERY, PYARROW, GOOGLE_CLOUD_STORAGE
 
-
-@component(base_image=PYTHON37, packages_to_install=[TENSORFLOW, TENSORFLOW_RECOMMENDERS])
+@component(base_image="gcr.io/qwiklabs-gcp-04-424f1fdacc59/moviecust:0.1", packages_to_install=[TENSORFLOW, TENSORFLOW_RECOMMENDERS, PANDAS, GOOGLE_CLOUD_BIGQUERY, PYARROW, GOOGLE_CLOUD_STORAGE])
 def train_tensorflow_model(
     data_root: str,
     movies_output_filename: str,
     train_output_filename: str,
     inference_output_filename: str,
     artifact_store: str,
+    timestamp: str,
+    bucket_name: str,
 ):
     import os
     import json
     import datetime
     import tensorflow as tf
-    import numpy as np
     import tensorflow_recommenders as tfrs
     import time
     import subprocess
     import sys
     import tempfile
 
+    from mubireco.model.model_definition import create_model
+    from mubireco.data.train import TrainDataset
+    from mubireco.data.inference import InferenceDataset
 
+    from mubireco.utils.configuration import Configuration
 
     batch_size = 10000
     num_evals = 100
     lr = 0.1
     timestamp_train = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     embedding_dim = 32
-    num_test_sample = 1000
-    output_dir = os.path.join(artifact_store, timestamp_train)
+    num_test_sample = 4
 
-    movies_output_path = os.path.join(data_root, "movies", movies_output_filename)
-    train_output_path = os.path.join(data_root, "train", train_output_filename)
-    inference_output_path = os.path.join(data_root, "inference", inference_output_filename)
+    output_dir = os.path.join(f"gs://{bucket_name}", timestamp, timestamp_train)
 
-    def read_tf_dataset(output_path) -> tf.data.Dataset:
-        return tf.data.experimental.load(output_path)
+    config = Configuration("mubireco/config/config.yaml")
 
-    def CandidateEncoder(unique_movie_ids, embedding_dimension, features):
-        embedding_movie_ids = tf.keras.Sequential([
-            tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),
-            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension),
-        ])
-
-        gru_encoder = tf.keras.layers.GRU(units=embedding_dimension, recurrent_initializer="glorot_uniform")
-        seq_embedding_movie_ids = embedding_movie_ids(features["previous_movie_ids"])
-        encoder = gru_encoder(seq_embedding_movie_ids)
-        return encoder
-
-
-    def MubiMoviesModel(task, candidate_model, query_model, features, training=False):
-        query = features.pop("movie_id")
-
-        query_encoder = query_model(query)
-        candidate_encoder = candidate_model(features)
-
-        return task(query_encoder, candidate_encoder, compute_metrics=not training)
-
-    def create_model(batch_size, embedding_dimension):
-        df_movies = read_tf_dataset(movies_output_path)
-        ds_train = read_tf_dataset(train_output_path)
-        unique_movie_ids = np.unique(np.concatenate(list(df_movies.batch(batch_size).map(lambda x: x["movie_id"]))))
-
-        query_model = tf.keras.Sequential([
-            tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),
-            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension)
-        ])
-
-        candidate_model = CandidateEncoder(unique_movie_ids, embedding_dimension)
-
-        metrics = tfrs.metrics.FactorizedTopK(
-            candidates=ds_train.batch(batch_size).map(candidate_model),
-            metrics=[
-                tf.keras.metrics.TopKCategoricalAccuracy(k=100, name=f"factorized_top_k/top_100_categorical_accuracy")]
-        )
-
-        task = tfrs.tasks.Retrieval(
-            metrics=metrics
-        )
-
-        return MubiMoviesModel(task, candidate_model, query_model)
-
-    ds_train = read_tf_dataset(train_output_path)
-    ds_inf = read_tf_dataset(inference_output_path)
+    ds_train = TrainDataset(config).read_tf_dataset()
+    ds_inf = InferenceDataset(config).read_tf_dataset()
 
     num_train_sample = len(ds_train) - num_test_sample
 
@@ -113,7 +69,7 @@ def train_tensorflow_model(
 
     with strategy.scope():
         # End #
-        model = create_model(batch_size, embedding_dim)
+        model = create_model(batch_size, embedding_dim, config)
         model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=lr))
 
     options = tf.data.Options()

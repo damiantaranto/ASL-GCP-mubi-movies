@@ -1,60 +1,6 @@
 {
   "pipelineSpec": {
     "components": {
-      "comp-inference-dataset": {
-        "executorLabel": "exec-inference-dataset",
-        "inputDefinitions": {
-          "parameters": {
-            "data_root": {
-              "type": "STRING"
-            },
-            "movies_output_filename": {
-              "type": "STRING"
-            },
-            "project_id": {
-              "type": "STRING"
-            },
-            "seq_length": {
-              "type": "INT"
-            }
-          }
-        }
-      },
-      "comp-movies-dataset": {
-        "executorLabel": "exec-movies-dataset",
-        "inputDefinitions": {
-          "parameters": {
-            "data_root": {
-              "type": "STRING"
-            },
-            "movies_output_filename": {
-              "type": "STRING"
-            },
-            "project_id": {
-              "type": "STRING"
-            }
-          }
-        }
-      },
-      "comp-train-dataset": {
-        "executorLabel": "exec-train-dataset",
-        "inputDefinitions": {
-          "parameters": {
-            "data_root": {
-              "type": "STRING"
-            },
-            "movies_output_filename": {
-              "type": "STRING"
-            },
-            "project_id": {
-              "type": "STRING"
-            },
-            "seq_length": {
-              "type": "INT"
-            }
-          }
-        }
-      },
       "comp-train-tensorflow-model": {
         "executorLabel": "exec-train-tensorflow-model",
         "inputDefinitions": {
@@ -63,6 +9,9 @@
               "type": "STRING"
             },
             "base_output_directory": {
+              "type": "STRING"
+            },
+            "bucket_name": {
               "type": "STRING"
             },
             "data_root": {
@@ -89,6 +38,9 @@
             "tensorboard": {
               "type": "STRING"
             },
+            "timestamp": {
+              "type": "STRING"
+            },
             "train_output_filename": {
               "type": "STRING"
             }
@@ -105,73 +57,13 @@
     },
     "deploymentSpec": {
       "executors": {
-        "exec-inference-dataset": {
-          "container": {
-            "args": [
-              "--executor_input",
-              "{{$}}",
-              "--function_to_execute",
-              "inference_dataset"
-            ],
-            "command": [
-              "sh",
-              "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'google-cloud-bigquery==2.34.2' 'tensorflow==2.6.2' 'pandas==1.3.2' 'pyarrow==7.0.0' 'kfp==1.8.10' && \"$0\" \"$@\"\n",
-              "sh",
-              "-ec",
-              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef inference_dataset(\n        project_id: str,\n        data_root: str,\n        movies_output_filename: str,\n        seq_length: int,\n):\n    import os\n    from google.cloud import bigquery\n    import pandas as pd\n    import tensorflow as tf\n\n    name_transformation = \"inference\"\n\n    sql_query = f\"\"\"WITH ratings AS (\n        SELECT\n            ratings.user_id,\n            ratings.movie_id,\n            ratings.rating_id,\n            ratings.rating_timestamp_utc,\n            ratings.rating_score,\n            COALESCE(ratings.user_eligible_for_trial, False) AS user_eligible_for_trial,\n            COALESCE(ratings.user_has_payment_method, False) AS user_has_payment_method,\n            COALESCE(ratings.user_subscriber, False) AS user_subscriber,\n            COALESCE(ratings.user_trialist, False) AS user_trialist,\n            movies.movie_title,\n            COALESCE(ratings.rating_score,\n             PERCENTILE_DISC(ratings.rating_score, 0.5) OVER (PARTITION BY ratings.movie_id)) AS rating_value,\n            COALESCE(DATE_DIFF(ratings.rating_timestamp_utc, LAG(ratings.rating_timestamp_utc, 1)\n                OVER (PARTITION BY user_id ORDER BY ratings.rating_timestamp_utc),  DAY), -1) AS days_since_last_rating,\n            COALESCE(movies.movie_release_year, 0) as movie_release_year,\n            movies.movie_title_language,\n            LAST_VALUE(ratings.rating_timestamp_utc) OVER (PARTITION BY user_id\n                ORDER BY ratings.rating_timestamp_utc\n                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_rating_timestamp\n        FROM `__DATASET_ID__.mubi_ratings_data` ratings\n        JOIN `__DATASET_ID__.mubi_movie_data` movies ON\n            ratings.movie_id = movies.movie_id\n            AND ratings.rating_score IS NOT NULL\n    ),\n    shifted_last_rating AS (\n         SELECT\n             ratings.user_id,\n             ratings.movie_id,\n             COALESCE(LAG(ratings.days_since_last_rating, 1) over (PARTITION BY user_id\n                ORDER BY ratings.days_since_last_rating DESC), 0) as shifted_days,\n         FROM ratings\n    ),\n    sequenced_rating AS (\n        SELECT\n            movie_title,\n            ratings.movie_id,\n            ratings.user_id,\n            rating_value,\n            movie_release_year,\n            rating_timestamp_utc,\n            user_eligible_for_trial,\n            days_since_last_rating,\n            user_has_payment_method,\n            user_subscriber,\n            user_trialist,\n            last_rating_timestamp,\n            ARRAY_AGG(ratings.movie_id) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_ids,\n            ARRAY_AGG(movie_release_year) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_years,\n            ARRAY_AGG(rating_value) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_score,\n            ARRAY_AGG(shifted_days) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_days_since_last_rating,\n        FROM ratings\n        INNER JOIN shifted_last_rating ON\n            ratings.user_id = shifted_last_rating.user_id\n            AND ratings.movie_id = shifted_last_rating.movie_id\n    )\n    SELECT * FROM sequenced_rating\n    WHERE ARRAY_LENGTH(previous_movie_ids) > 2\n        AND rating_timestamp_utc = last_rating_timestamp\"\"\"\n\n\n    data_path = os.path.join(data_root, name_transformation)\n\n    output_path = os.path.join(data_path, movies_output_filename)\n\n    def load_dataset(query) -> pd.DataFrame:\n        bq_client = bigquery.Client()\n        results = bq_client.query(query, project=project_id).to_dataframe()\n        return results\n\n    def save_tf_dataset(dict_features) -> None:\n        dataset = tf.data.Dataset.from_tensor_slices(dict_features)\n\n        if not tf.io.gfile.exists(data_path):\n            tf.io.gfile.makedirs(data_path)\n\n        tf.data.experimental.save(dataset, output_path)\n\n    def get_features_dict(rows) -> dict:\n        dict_features = dict(\n            **rows[[\"user_id\"]].astype(\"int\"),\n            **rows[[\"user_eligible_for_trial\"]].astype(\"int\"),\n            **rows[[\"user_has_payment_method\"]].astype(\"int\"),\n            **rows[[\"user_subscriber\"]].astype(\"int\"),\n            **rows[[\"user_trialist\"]].astype(\"int\"),\n            **{\"previous_movie_ids\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_movie_ids\"].values,\n                                                              maxlen=seq_length, dtype='int32', value=0)},\n            **{\"previous_movie_years\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_movie_years\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=1980.0)},\n            **{\"previous_score\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_score\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=2.5)},\n            **{\"previous_days_since_last_rating\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_days_since_last_rating\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=0)}\n        )\n        return dict_features\n\n    try:\n        assert not tf.io.gfile.exists(output_path)\n    except AssertionError:\n        raise ValueError(\"Dataset already exists, load it. Remove timestamp from config in case of new run\")\n\n    sql_query = (\n        sql_query\n            .replace(\"__DATASET_ID__\", str(\"mubi_movie_data\"))\n            .replace(\"__FRAME_START__\", str(9))\n            .replace(\"__FRAME_END__\", str(0))\n    )\n\n    rows = load_dataset(sql_query)\n\n    dict_features = get_features_dict(rows)\n    del rows\n\n    save_tf_dataset(dict_features)\n\n"
-            ],
-            "image": "python:3.8"
-          }
-        },
-        "exec-movies-dataset": {
-          "container": {
-            "args": [
-              "--executor_input",
-              "{{$}}",
-              "--function_to_execute",
-              "movies_dataset"
-            ],
-            "command": [
-              "sh",
-              "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'google-cloud-bigquery==2.34.2' 'tensorflow==2.6.2' 'pandas==1.3.2' 'pyarrow==7.0.0' 'kfp==1.8.10' && \"$0\" \"$@\"\n",
-              "sh",
-              "-ec",
-              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef movies_dataset(\n        project_id: str,\n        data_root: str,\n        movies_output_filename: str,\n):\n    import os\n    from google.cloud import bigquery\n    import pandas as pd\n    import tensorflow as tf\n\n    name_transformation = \"movies\"\n\n    sql_query = f\"\"\"SELECT DISTINCT\n            ratings.movie_id,\n            movies.movie_title,\n        FROM `mubi_movie_data.mubi_ratings_data` ratings\n        JOIN `mubi_movie_data.mubi_movie_data` movies ON\n            ratings.movie_id = movies.movie_id\"\"\"\n\n    data_path = os.path.join(data_root, name_transformation)\n\n    output_path = os.path.join(data_path, movies_output_filename)\n\n    def load_dataset(query) -> pd.DataFrame:\n        bq_client = bigquery.Client()\n        results = bq_client.query(query, project=project_id).to_dataframe()\n        return results\n\n    def save_tf_dataset(dict_features) -> None:\n        dataset = tf.data.Dataset.from_tensor_slices(dict_features)\n\n        if not tf.io.gfile.exists(data_path):\n            tf.io.gfile.makedirs(data_path)\n\n        tf.data.experimental.save(dataset, output_path)\n\n    def get_features_dict(rows) -> dict:\n        dict_features = dict(\n            **rows[[\"movie_id\"]].astype(\"int\"),\n            **rows[[\"movie_title\"]].astype(\"str\"),\n        )\n        return dict_features\n\n    try:\n        assert not tf.io.gfile.exists(output_path)\n    except AssertionError:\n        raise ValueError(\"Dataset already exists, load it. Remove timestamp from config in case of new run\")\n\n    rows = load_dataset(sql_query)\n\n    dict_features = get_features_dict(rows)\n    del rows\n\n    save_tf_dataset(dict_features)\n\n"
-            ],
-            "image": "python:3.8"
-          }
-        },
-        "exec-train-dataset": {
-          "container": {
-            "args": [
-              "--executor_input",
-              "{{$}}",
-              "--function_to_execute",
-              "train_dataset"
-            ],
-            "command": [
-              "sh",
-              "-c",
-              "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'google-cloud-bigquery==2.34.2' 'tensorflow==2.6.2' 'pandas==1.3.2' 'pyarrow==7.0.0' 'kfp==1.8.10' && \"$0\" \"$@\"\n",
-              "sh",
-              "-ec",
-              "program_path=$(mktemp -d)\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
-              "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing import *\n\ndef train_dataset(\n        project_id: str,\n        data_root: str,\n        movies_output_filename: str,\n        seq_length: int,\n):\n    import os\n    from google.cloud import bigquery\n    import pandas as pd\n    import tensorflow as tf\n\n    name_transformation = \"train\"\n\n    sql_query = \"\"\"WITH ratings AS (\n        SELECT\n            ratings.user_id,\n            ratings.movie_id,\n            ratings.rating_id,\n            ratings.rating_timestamp_utc,\n            ratings.rating_score,\n            COALESCE(ratings.user_eligible_for_trial, False) AS user_eligible_for_trial,\n            COALESCE(ratings.user_has_payment_method, False) AS user_has_payment_method,\n            COALESCE(ratings.user_subscriber, False) AS user_subscriber,\n            COALESCE(ratings.user_trialist, False) AS user_trialist,\n            movies.movie_title,\n            COALESCE(ratings.rating_score,\n             PERCENTILE_DISC(ratings.rating_score, 0.5) OVER (PARTITION BY ratings.movie_id)) AS rating_value,\n            COALESCE(DATE_DIFF(ratings.rating_timestamp_utc, LAG(ratings.rating_timestamp_utc, 1)\n                OVER (PARTITION BY user_id ORDER BY ratings.rating_timestamp_utc),  DAY), -1) AS days_since_last_rating,\n            COALESCE(movies.movie_release_year, 0) as movie_release_year,\n            movies.movie_title_language,\n            LAST_VALUE(ratings.rating_timestamp_utc) OVER (PARTITION BY user_id\n                ORDER BY ratings.rating_timestamp_utc\n                ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) AS last_rating_timestamp\n        FROM `__DATASET_ID__.mubi_ratings_data` ratings\n        JOIN `__DATASET_ID__.mubi_movie_data` movies ON\n            ratings.movie_id = movies.movie_id\n            AND ratings.rating_score IS NOT NULL\n    ),\n    shifted_last_rating AS (\n         SELECT\n             ratings.user_id,\n             ratings.movie_id,\n             COALESCE(LAG(ratings.days_since_last_rating, 1) over (PARTITION BY user_id\n                ORDER BY ratings.days_since_last_rating DESC), 0) as shifted_days,\n         FROM ratings\n    ),\n    sequenced_rating AS (\n        SELECT\n            movie_title,\n            ratings.movie_id,\n            ratings.user_id,\n            rating_value,\n            movie_release_year,\n            rating_timestamp_utc,\n            user_eligible_for_trial,\n            days_since_last_rating,\n            user_has_payment_method,\n            user_subscriber,\n            user_trialist,\n            last_rating_timestamp,\n            ARRAY_AGG(ratings.movie_id) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_ids,\n            ARRAY_AGG(movie_release_year) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_movie_years,\n            ARRAY_AGG(rating_value) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_score,\n            ARRAY_AGG(shifted_days) OVER (PARTITION BY ratings.user_id\n                ORDER BY rating_timestamp_utc asc\n                ROWS BETWEEN __FRAME_START__ PRECEDING AND __FRAME_END__ PRECEDING) AS previous_days_since_last_rating,\n        FROM ratings\n        INNER JOIN shifted_last_rating ON\n            ratings.user_id = shifted_last_rating.user_id\n            AND ratings.movie_id = shifted_last_rating.movie_id\n    )\n    SELECT * FROM sequenced_rating --where ARRAY_LENGTH(previous_movie_ids) > 2\n    WHERE ABS(MOD(FARM_FINGERPRINT(CAST(rating_timestamp_utc AS STRING)), 100)) IN (10, 20, 30, 40)\"\"\"\n\n    data_path = os.path.join(data_root, name_transformation)\n\n    output_path = os.path.join(data_path, movies_output_filename)\n\n    def load_dataset(query) -> pd.DataFrame:\n        bq_client = bigquery.Client()\n        results = bq_client.query(query, project=project_id).to_dataframe()\n        return results\n\n    def save_tf_dataset(dict_features) -> None:\n        dataset = tf.data.Dataset.from_tensor_slices(dict_features)\n\n        if not tf.io.gfile.exists(data_path):\n            tf.io.gfile.makedirs(data_path)\n\n        tf.data.experimental.save(dataset, output_path)\n\n    def get_features_dict(rows) -> dict:\n        dict_features = dict(\n            **rows[[\"movie_id\"]].astype(\"int\"),\n            **rows[[\"user_eligible_for_trial\"]].astype(\"int\"),\n            **rows[[\"user_has_payment_method\"]].astype(\"int\"),\n            **rows[[\"user_subscriber\"]].astype(\"int\"),\n            **rows[[\"user_trialist\"]].astype(\"int\"),\n            **{\"previous_movie_ids\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_movie_ids\"].values,\n                                                              maxlen=seq_length, dtype='int32', value=0)},\n            **{\"previous_movie_years\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_movie_years\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=1980.0)},\n            **{\"previous_score\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_score\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=2.5)},\n            **{\"previous_days_since_last_rating\":\n                tf.keras.preprocessing.sequence.pad_sequences(rows[\"previous_days_since_last_rating\"].values,\n                                                              maxlen=seq_length, dtype='float32', value=0)}\n        )\n        return dict_features\n\n    try:\n        assert not tf.io.gfile.exists(output_path)\n    except AssertionError:\n        raise ValueError(\"Dataset already exists, load it. Remove timestamp from config in case of new run\")\n\n    sql_query = (\n        sql_query\n            .replace(\"__DATASET_ID__\", str(\"mubi_movie_data\"))\n            .replace(\"__FRAME_START__\", str(10))\n            .replace(\"__FRAME_END__\", str(1))\n    )\n\n    rows = load_dataset(sql_query)\n\n    dict_features = get_features_dict(rows)\n    del rows\n\n    save_tf_dataset(dict_features)\n\n"
-            ],
-            "image": "python:3.8"
-          }
-        },
         "exec-train-tensorflow-model": {
           "container": {
             "args": [
               "--type",
               "CustomJob",
               "--payload",
-              "{\"display_name\": \"Train tensorflow model\", \"job_spec\": {\"worker_pool_specs\": [{\"machine_spec\": {\"machine_type\": \"n1-standard-4\"}, \"replica_count\": 1, \"container_spec\": {\"image_uri\": \"python:3.8\", \"command\": [\"sh\", \"-c\", \"\\nif ! [ -x \\\"$(command -v pip)\\\" ]; then\\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\\nfi\\n\\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'tensorflow==2.6.2' 'tensorflow-recommenders==0.6.0' 'kfp==1.8.10' && \\\"$0\\\" \\\"$@\\\"\\n\", \"sh\", \"-ec\", \"program_path=$(mktemp -d)\\nprintf \\\"%s\\\" \\\"$0\\\" > \\\"$program_path/ephemeral_component.py\\\"\\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \\\"$program_path/ephemeral_component.py\\\"                         \\\"$@\\\"\\n\", \"\\nimport kfp\\nfrom kfp.v2 import dsl\\nfrom kfp.v2.dsl import *\\nfrom typing import *\\n\\ndef train_tensorflow_model(\\n    data_root: str,\\n    movies_output_filename: str,\\n    train_output_filename: str,\\n    inference_output_filename: str,\\n    artifact_store: str,\\n):\\n    import os\\n    import json\\n    import datetime\\n    import tensorflow as tf\\n    import numpy as np\\n    import tensorflow_recommenders as tfrs\\n    import time\\n    import subprocess\\n    import sys\\n    import tempfile\\n\\n    batch_size = 10000\\n    num_evals = 100\\n    lr = 0.1\\n    timestamp_train = datetime.datetime.now().strftime(\\\"%Y%m%d%H%M%S\\\")\\n    embedding_dim = 32\\n    num_test_sample = 1000\\n    output_dir = os.path.join(artifact_store, timestamp_train)\\n\\n    movies_output_path = os.path.join(data_root, \\\"movies\\\", movies_output_filename)\\n    train_output_path = os.path.join(data_root, \\\"train\\\", train_output_filename)\\n    inference_output_path = os.path.join(data_root, \\\"inference\\\", inference_output_filename)\\n\\n    def read_tf_dataset(output_path) -> tf.data.Dataset:\\n        return tf.data.experimental.load(output_path)\\n\\n    def CandidateEncoder(unique_movie_ids, embedding_dimension, features):\\n        embedding_movie_ids = tf.keras.Sequential([\\n            tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),\\n            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension),\\n        ])\\n\\n        gru_encoder = tf.keras.layers.GRU(units=embedding_dimension, recurrent_initializer=\\\"glorot_uniform\\\")\\n\\n        seq_embedding_movie_ids = embedding_movie_ids(features[\\\"previous_movie_ids\\\"])\\n\\n        encoder = gru_encoder(seq_embedding_movie_ids)\\n\\n        return encoder\\n\\n\\n    def MubiMoviesModel(task, candidate_model, query_model, features, training=False):\\n        query = features.pop(\\\"movie_id\\\")\\n\\n        query_encoder = query_model(query)\\n        candidate_encoder = candidate_model(features)\\n\\n        return task(query_encoder, candidate_encoder, compute_metrics=not training)\\n\\n\\n\\n    def create_model(batch_size, embedding_dimension):\\n        df_movies = read_tf_dataset(movies_output_path)\\n        ds_train = read_tf_dataset(train_output_path)\\n        unique_movie_ids = np.unique(np.concatenate(list(df_movies.batch(batch_size).map(lambda x: x[\\\"movie_id\\\"]))))\\n\\n        query_model = tf.keras.Sequential([\\n            tf.keras.layers.IntegerLookup(vocabulary=unique_movie_ids, mask_token=None),\\n            tf.keras.layers.Embedding(len(unique_movie_ids) + 1, embedding_dimension)\\n        ])\\n\\n        candidate_model = CandidateEncoder(unique_movie_ids, embedding_dimension)\\n\\n        metrics = tfrs.metrics.FactorizedTopK(\\n            candidates=ds_train.batch(batch_size).map(candidate_model),\\n            metrics=[\\n                tf.keras.metrics.TopKCategoricalAccuracy(k=100, name=f\\\"factorized_top_k/top_100_categorical_accuracy\\\")]\\n        )\\n\\n        task = tfrs.tasks.Retrieval(\\n            metrics=metrics\\n        )\\n\\n        return MubiMoviesModel(task, candidate_model, query_model)\\n\\n    ds_train = read_tf_dataset(train_output_path)\\n    ds_inf = read_tf_dataset(inference_output_path)\\n\\n    num_train_sample = len(ds_train) - num_test_sample\\n\\n    tf.random.set_seed(42)\\n    ds_train = ds_train.shuffle(100_000, seed=42, reshuffle_each_iteration=False)\\n\\n    ds_train_shuffled = ds_train.take(num_train_sample)\\n    ds_val_shuffled = ds_train.skip(num_train_sample)\\n\\n    cached_train = ds_train_shuffled.batch(batch_size).repeat().cache()\\n    cached_val = ds_val_shuffled.batch(batch_size).cache()\\n\\n    steps_per_epoch = len(ds_train) // (batch_size * num_evals)\\n\\n    checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(\\n        os.path.join(output_dir, \\\"checkpoints\\\"), save_weights_only=True, verbose=1\\n    )\\n    tensorboard_cb = tf.keras.callbacks.TensorBoard(\\n        os.path.join(output_dir, \\\"tensorboard\\\"), histogram_freq=1\\n    )\\n\\n    early_stopping_cb = tf.keras.callbacks.EarlyStopping(patience=10,\\n                                                         monitor=\\\"factorized_top_k/top_100_categorical_accuracy\\\")\\n\\n    # For MirroredStrategy #\\n    strategy = tf.distribute.MirroredStrategy()\\n\\n    with strategy.scope():\\n        # End #\\n        model = create_model(batch_size, embedding_dim)\\n        model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=lr))\\n\\n    options = tf.data.Options()\\n    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF\\n    cached_train = cached_train.with_options(options)\\n    cached_val = cached_val.with_options(options)\\n\\n    start = time.time()\\n    history = model.fit(\\n        cached_train,\\n        # validation_data=cached_val,\\n        steps_per_epoch=steps_per_epoch,\\n        epochs=num_evals,\\n        verbose=1,  # 0=silent, 1=progress bar, 2=one line per epoch\\n        callbacks=[checkpoint_cb, tensorboard_cb]  # , early_stopping_cb],\\n    )\\n    print(\\\"Training time with single GPUs: {}\\\".format(time.time() - start))\\n\\n    results = model.evaluate(cached_val, return_dict=True)\\n\\n    filename_results = \\\"eval_results.json\\\"\\n    with open(filename_results, \\\"w\\\") as f:\\n        json.dump(results, f)\\n    gcs_model_path = os.path.join(output_dir, filename_results)\\n    subprocess.check_call([\\\"gsutil\\\", \\\"cp\\\", filename_results, gcs_model_path], stderr=sys.stdout)\\n    print(f\\\"Saved model in: {gcs_model_path}\\\")\\n\\n    index = tfrs.layers.factorized_top_k.BruteForce(model.query_model)\\n\\n    index.index_from_dataset(\\n        tf.data.Dataset.zip(\\n            (ds_inf.map(lambda x: x[\\\"user_id\\\"]).batch(batch_size),\\n             ds_inf.batch(batch_size).map(model.candidate_model)))\\n    )\\n\\n    # example, to keep otherwise bug in saved model\\n    _, _ = index(tf.constant([42]))\\n\\n    with tempfile.TemporaryDirectory() as tmp:\\n        # Save the index.\\n        tf.saved_model.save(index, os.path.join(output_dir, \\\"models\\\"))\\n\\n\"], \"args\": [\"--executor_input\", \"{{$.json_escape[1]}}\", \"--function_to_execute\", \"train_tensorflow_model\"]}, \"disk_spec\": {\"boot_disk_type\": \"pd-ssd\", \"boot_disk_size_gb\": 100}}], \"service_account\": \"{{$.inputs.parameters['service_account']}}\", \"network\": \"{{$.inputs.parameters['network']}}\", \"tensorboard\": \"{{$.inputs.parameters['tensorboard']}}\", \"base_output_directory\": {\"output_uri_prefix\": \"{{$.inputs.parameters['base_output_directory']}}\"}}}",
+              "{\"display_name\": \"Train tensorflow model\", \"job_spec\": {\"worker_pool_specs\": [{\"machine_spec\": {\"machine_type\": \"n1-standard-32\", \"accelerator_type\": \"NVIDIA_TESLA_T4\", \"accelerator_count\": 2}, \"replica_count\": 1, \"container_spec\": {\"image_uri\": \"gcr.io/qwiklabs-gcp-04-424f1fdacc59/moviecust:0.1\", \"command\": [\"sh\", \"-c\", \"\\nif ! [ -x \\\"$(command -v pip)\\\" ]; then\\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\\nfi\\n\\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'tensorflow==2.6.2' 'tensorflow-recommenders==0.6.0' 'pandas==1.3.2' 'google-cloud-bigquery==2.34.2' 'pyarrow==7.0.0' 'google-cloud-storage==1.42.2' 'kfp==1.8.10' && \\\"$0\\\" \\\"$@\\\"\\n\", \"sh\", \"-ec\", \"program_path=$(mktemp -d)\\nprintf \\\"%s\\\" \\\"$0\\\" > \\\"$program_path/ephemeral_component.py\\\"\\npython3 -m kfp.v2.components.executor_main                         --component_module_path                         \\\"$program_path/ephemeral_component.py\\\"                         \\\"$@\\\"\\n\", \"\\nimport kfp\\nfrom kfp.v2 import dsl\\nfrom kfp.v2.dsl import *\\nfrom typing import *\\n\\ndef train_tensorflow_model(\\n    data_root: str,\\n    movies_output_filename: str,\\n    train_output_filename: str,\\n    inference_output_filename: str,\\n    artifact_store: str,\\n    timestamp: str,\\n    bucket_name: str,\\n):\\n    import os\\n    import json\\n    import datetime\\n    import tensorflow as tf\\n    import tensorflow_recommenders as tfrs\\n    import time\\n    import subprocess\\n    import sys\\n    import tempfile\\n\\n    from mubireco.model.model_definition import create_model\\n    from mubireco.data.train import TrainDataset\\n    from mubireco.data.inference import InferenceDataset\\n\\n    from mubireco.utils.configuration import Configuration\\n\\n    batch_size = 10000\\n    num_evals = 100\\n    lr = 0.1\\n    timestamp_train = datetime.datetime.now().strftime(\\\"%Y%m%d%H%M%S\\\")\\n    embedding_dim = 32\\n    num_test_sample = 4\\n\\n    output_dir = os.path.join(f\\\"gs://{bucket_name}\\\", timestamp, timestamp_train)\\n\\n    config = Configuration(\\\"mubireco/config/config.yaml\\\")\\n\\n    ds_train = TrainDataset(config).read_tf_dataset()\\n    ds_inf = InferenceDataset(config).read_tf_dataset()\\n\\n    num_train_sample = len(ds_train) - num_test_sample\\n\\n    tf.random.set_seed(42)\\n    ds_train = ds_train.shuffle(100_000, seed=42, reshuffle_each_iteration=False)\\n\\n    ds_train_shuffled = ds_train.take(num_train_sample)\\n    ds_val_shuffled = ds_train.skip(num_train_sample)\\n\\n    cached_train = ds_train_shuffled.batch(batch_size).repeat().cache()\\n    cached_val = ds_val_shuffled.batch(batch_size).cache()\\n\\n    steps_per_epoch = len(ds_train) // (batch_size * num_evals)\\n\\n    checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(\\n        os.path.join(output_dir, \\\"checkpoints\\\"), save_weights_only=True, verbose=1\\n    )\\n    tensorboard_cb = tf.keras.callbacks.TensorBoard(\\n        os.path.join(output_dir, \\\"tensorboard\\\"), histogram_freq=1\\n    )\\n\\n    early_stopping_cb = tf.keras.callbacks.EarlyStopping(patience=10,\\n                                                         monitor=\\\"factorized_top_k/top_100_categorical_accuracy\\\")\\n\\n    # For MirroredStrategy #\\n    strategy = tf.distribute.MirroredStrategy()\\n\\n    with strategy.scope():\\n        # End #\\n        model = create_model(batch_size, embedding_dim, config)\\n        model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=lr))\\n\\n    options = tf.data.Options()\\n    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.OFF\\n    cached_train = cached_train.with_options(options)\\n    cached_val = cached_val.with_options(options)\\n\\n    start = time.time()\\n    history = model.fit(\\n        cached_train,\\n        # validation_data=cached_val,\\n        steps_per_epoch=steps_per_epoch,\\n        epochs=num_evals,\\n        verbose=1,  # 0=silent, 1=progress bar, 2=one line per epoch\\n        callbacks=[checkpoint_cb, tensorboard_cb]  # , early_stopping_cb],\\n    )\\n    print(\\\"Training time with single GPUs: {}\\\".format(time.time() - start))\\n\\n    results = model.evaluate(cached_val, return_dict=True)\\n\\n    filename_results = \\\"eval_results.json\\\"\\n    with open(filename_results, \\\"w\\\") as f:\\n        json.dump(results, f)\\n    gcs_model_path = os.path.join(output_dir, filename_results)\\n    subprocess.check_call([\\\"gsutil\\\", \\\"cp\\\", filename_results, gcs_model_path], stderr=sys.stdout)\\n    print(f\\\"Saved model in: {gcs_model_path}\\\")\\n\\n    index = tfrs.layers.factorized_top_k.BruteForce(model.query_model)\\n\\n    index.index_from_dataset(\\n        tf.data.Dataset.zip(\\n            (ds_inf.map(lambda x: x[\\\"user_id\\\"]).batch(batch_size),\\n             ds_inf.batch(batch_size).map(model.candidate_model)))\\n    )\\n\\n    # example, to keep otherwise bug in saved model\\n    _, _ = index(tf.constant([42]))\\n\\n    with tempfile.TemporaryDirectory() as tmp:\\n        # Save the index.\\n        tf.saved_model.save(index, os.path.join(output_dir, \\\"models\\\"))\\n\\n\"], \"args\": [\"--executor_input\", \"{{$.json_escape[1]}}\", \"--function_to_execute\", \"train_tensorflow_model\"]}, \"disk_spec\": {\"boot_disk_type\": \"pd-ssd\", \"boot_disk_size_gb\": 100}}], \"service_account\": \"{{$.inputs.parameters['service_account']}}\", \"network\": \"{{$.inputs.parameters['network']}}\", \"tensorboard\": \"{{$.inputs.parameters['tensorboard']}}\", \"base_output_directory\": {\"output_uri_prefix\": \"{{$.inputs.parameters['base_output_directory']}}\"}}}",
               "--project",
               "{{$.inputs.parameters['project']}}",
               "--location",
@@ -196,117 +88,6 @@
     "root": {
       "dag": {
         "tasks": {
-          "inference-dataset": {
-            "cachingOptions": {
-              "enableCache": true
-            },
-            "componentRef": {
-              "name": "comp-inference-dataset"
-            },
-            "inputs": {
-              "parameters": {
-                "data_root": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
-                    }
-                  }
-                },
-                "movies_output_filename": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "inference_mubi.tfdataset"
-                    }
-                  }
-                },
-                "pipelineparam--model_name": {
-                  "componentInputParameter": "model_name"
-                },
-                "project_id": {
-                  "componentInputParameter": "project_id"
-                },
-                "seq_length": {
-                  "componentInputParameter": "seq_length"
-                }
-              }
-            },
-            "taskInfo": {
-              "name": "inference-dataset"
-            }
-          },
-          "movies-dataset": {
-            "cachingOptions": {
-              "enableCache": true
-            },
-            "componentRef": {
-              "name": "comp-movies-dataset"
-            },
-            "inputs": {
-              "parameters": {
-                "data_root": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
-                    }
-                  }
-                },
-                "movies_output_filename": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "movies_mubi.tfdataset"
-                    }
-                  }
-                },
-                "pipelineparam--model_name": {
-                  "componentInputParameter": "model_name"
-                },
-                "project_id": {
-                  "componentInputParameter": "project_id"
-                }
-              }
-            },
-            "taskInfo": {
-              "name": "movies-dataset"
-            }
-          },
-          "train-dataset": {
-            "cachingOptions": {
-              "enableCache": true
-            },
-            "componentRef": {
-              "name": "comp-train-dataset"
-            },
-            "inputs": {
-              "parameters": {
-                "data_root": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
-                    }
-                  }
-                },
-                "movies_output_filename": {
-                  "runtimeValue": {
-                    "constantValue": {
-                      "stringValue": "train_mubi.tfdataset"
-                    }
-                  }
-                },
-                "pipelineparam--model_name": {
-                  "componentInputParameter": "model_name"
-                },
-                "project_id": {
-                  "componentInputParameter": "project_id"
-                },
-                "seq_length": {
-                  "componentInputParameter": "seq_length"
-                }
-              }
-            },
-            "taskInfo": {
-              "name": "train-dataset"
-            }
-          },
           "train-tensorflow-model": {
             "cachingOptions": {
               "enableCache": true
@@ -314,11 +95,6 @@
             "componentRef": {
               "name": "comp-train-tensorflow-model"
             },
-            "dependentTasks": [
-              "inference-dataset",
-              "movies-dataset",
-              "train-dataset"
-            ],
             "inputs": {
               "parameters": {
                 "artifact_store": {
@@ -335,10 +111,17 @@
                     }
                   }
                 },
+                "bucket_name": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store"
+                    }
+                  }
+                },
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220315224327/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220316160407/data"
                     }
                   }
                 },
@@ -387,6 +170,13 @@
                   "runtimeValue": {
                     "constantValue": {
                       "stringValue": ""
+                    }
+                  }
+                },
+                "timestamp": {
+                  "runtimeValue": {
+                    "constantValue": {
+                      "stringValue": "20220316160407"
                     }
                   }
                 },
