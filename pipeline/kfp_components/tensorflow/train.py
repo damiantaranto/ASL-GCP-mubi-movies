@@ -21,6 +21,8 @@ def train_tensorflow_model(
     import sys
     import tempfile
 
+
+
     batch_size = 10000
     num_evals = 100
     lr = 0.1
@@ -43,11 +45,8 @@ def train_tensorflow_model(
         ])
 
         gru_encoder = tf.keras.layers.GRU(units=embedding_dimension, recurrent_initializer="glorot_uniform")
-
         seq_embedding_movie_ids = embedding_movie_ids(features["previous_movie_ids"])
-
         encoder = gru_encoder(seq_embedding_movie_ids)
-
         return encoder
 
 
@@ -58,8 +57,6 @@ def train_tensorflow_model(
         candidate_encoder = candidate_model(features)
 
         return task(query_encoder, candidate_encoder, compute_metrics=not training)
-
-
 
     def create_model(batch_size, embedding_dimension):
         df_movies = read_tf_dataset(movies_output_path)
