@@ -25,7 +25,7 @@ def tensorflow_pipeline(
 
     artifact_store = "gs://{model}-kfp-artifact-store/".format(model=model_name)
     # timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    timestamp = "20220308134842"
+    timestamp = "20220311195134"
 
     movie_query = movies_dataset(
         project_id=project_id,

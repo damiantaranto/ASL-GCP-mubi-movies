@@ -353,7 +353,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220308134842/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311195134/data"
                     }
                   }
                 },
@@ -391,7 +391,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220308134842/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311195134/data"
                     }
                   }
                 },
@@ -426,7 +426,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220308134842/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311195134/data"
                     }
                   }
                 },
@@ -490,7 +490,7 @@
                 "data_root": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220308134842/data"
+                      "stringValue": "gs://{{$.inputs.parameters['pipelineparam--model_name']}}-kfp-artifact-store/20220311195134/data"
                     }
                   }
                 },
@@ -545,7 +545,7 @@
                 "timestamp": {
                   "runtimeValue": {
                     "constantValue": {
-                      "stringValue": "20220308134842"
+                      "stringValue": "20220311195134"
                     }
                   }
                 },
