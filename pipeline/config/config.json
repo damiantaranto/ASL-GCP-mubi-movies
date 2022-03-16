@@ -1,0 +1,12 @@
+{
+    "attributes": {
+        "enable_caching": "False",
+        "enable_scheduled_time": "True",
+        "template_path": "training.json"
+    },
+    "data": {
+        "project_id": "qwiklabs-gcp-04-424f1fdacc59",
+        "model_name": "mubi-reco",
+        "seq_length": 10
+    }
+}
