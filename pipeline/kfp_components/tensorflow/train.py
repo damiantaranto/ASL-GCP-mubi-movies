@@ -20,6 +20,8 @@ def train_tensorflow_model(
     import subprocess
     import sys
     import tempfile
+    
+    from google.cloud import storage
 
     from mubireco.model.model_definition import create_model
     from mubireco.data.train import TrainDataset
@@ -90,11 +92,12 @@ def train_tensorflow_model(
 
     results = model.evaluate(cached_val, return_dict=True)
 
-    filename_results = "eval_results.json"
-    with open(filename_results, "w") as f:
-        json.dump(results, f)
-    gcs_model_path = os.path.join(output_dir, filename_results)
-    subprocess.check_call(["gsutil", "cp", filename_results, gcs_model_path], stderr=sys.stdout)
+    # Instantiates a client
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    gcs_model_path = os.path.join(timestamp, timestamp_train, "eval_results.json")
+    blob = bucket.blob(gcs_model_path)
+    blob.upload_from_string(data=json.dumps(results), content_type='application/json')
     print(f"Saved model in: {gcs_model_path}")
 
     index = tfrs.layers.factorized_top_k.BruteForce(model.query_model)
