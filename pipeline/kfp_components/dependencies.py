@@ -7,6 +7,10 @@ TF_TRAINING_CONTAINER_IMAGE_URI = (
     "europe-docker.pkg.dev/vertex-ai/training/tf-cpu.2-6:latest"
 )
 
+TF_SERVING_CONTAINER_IMAGE_URI = (
+    "europe-docker.pkg.dev/vertex-ai/prediction/tf2-cpu.2-6:latest"
+)
+
 # ###########################################
 # Required packages + versions for components
 # ###########################################
