@@ -101,8 +101,8 @@ def train_tensorflow_model(
     blob.upload_from_string(data=json.dumps(results), content_type='application/json')
     print(f"Saved model in: {gcs_model_path}")
 
-    model.path = os.path.join(timestamp, timestamp_train)
-    model.save(model.path, save_format="tf")
+    # model.path = os.path.join(timestamp, timestamp_train)
+    # model.save(model.path, save_format="tf")
 
     index = tfrs.layers.factorized_top_k.BruteForce(model.query_model)
 
