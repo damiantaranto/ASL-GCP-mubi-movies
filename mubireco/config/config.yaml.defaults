@@ -1,0 +1,14 @@
+general:
+  project: gcp_project
+  region: project_region
+  model_name: model_name
+  bucket: bucket_name
+  timestamp: 20220308134842
+
+data_preprocessing:
+  max_length_sequence: 10
+  dataset_id: raw_dataset
+  output_filename:
+    train: train_mubi.tfdataset
+    inference: inference_mubi.tfdataset
+    movies: movies_mubi.tfdataset
