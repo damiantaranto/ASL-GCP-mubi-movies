@@ -50,9 +50,8 @@ array([[1960., 1975., 2011., 1973., 1998., 1989., 1983., 1987., 2004.,
         1979.]], dtype=float32)>, 'user_trialist': <tf.Tensor: shape=(2,), dtype=int64, numpy=array([0, 0])>, 'user_eligible_for_trial': <tf.Tensor: shape=(2,), dtype=int64, numpy=array([1, 1])>, 'movie_id': <tf.Tensor: shape=(2,), dtype=int64, numpy=array([11431,  7827])>, 'user_has_payment_method': <tf.Tensor: shape=(2,), dtype=int64, numpy=array([0, 0])>}
 ```
 
-# ASL-GCP-mubi-movies
-Google ASL 
 
+## VertexAI pipeline
 To run the pipeline - first set the following as you environemt varaibles - also in ```env.sh```
 ```
 export PIPELINE_FILES_GCS_PATH=gs://movie_pipeline_staging/pipelines
